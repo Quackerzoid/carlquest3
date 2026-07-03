@@ -102,6 +102,7 @@ Entry format:
 ### 6.4 Known Issues (keep current — remove only when fixed and verified)
 
 - Server test stdout is not pristine: `@colyseus/tools` prints an ".env file not found" info line, and MatchRoom onJoin/onLeave console.logs (plan-mandated) appear in Vitest output. Cosmetic; revisit when MatchRoom gains real logic.
-- `npm audit` reports 5 vulnerabilities (3 moderate, 1 high, 1 critical) in transitive dev/runtime deps as of 2026-07-03; not triaged yet.
+- `npm audit` reports 10 vulnerabilities (8 moderate, 1 high, 1 critical) as of 2026-07-03, triaged at M1 final review: critical = Vitest UI file-read/execute (UI never used, dev-only); high = Vite dev-server issues (localhost dev only); moderates = esbuild dev CORS + nanoid <3.3.8 in @colyseus/core (only runtime one; predictability condition doesn't apply to Colyseus usage). All fixes need breaking major bumps (Vite 7/8, Vitest 3, Colyseus 0.16+) — deferred deliberately; revisit at a natural upgrade point.
+- Client `SceneModule.resize()` re-applies `setPixelRatio(window.devicePixelRatio)` per resize event — reviewed and kept (catches cross-monitor DPI changes; idempotent, cheap). Not a defect; noted so it isn't re-flagged.
 - `server/package.json` `build` script aliases typecheck (no emit config yet); real build wiring deferred until a milestone needs emitted server JS.
 - Client WebGL renders very slowly in the sandboxed preview browser (software rasteriser) — verification used headless Edge instead; real browsers are fine.

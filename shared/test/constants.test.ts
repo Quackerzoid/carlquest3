@@ -113,7 +113,7 @@ describe('constants', () => {
       expect(CONST.GAME.REFLEX_W).toBe(0.3);
     });
 
-    it('pins bench stamina regeneration to 1 per second', () => {
+    it('pins bench stamina regeneration to 1 per play', () => {
       expect(CONST.GAME.BENCH_STAMINA_REGEN).toBe(1);
     });
   });
@@ -163,6 +163,8 @@ describe('constants', () => {
     it('is deeply frozen', () => {
       expect(Object.isFrozen(CONST)).toBe(true);
       expect(Object.isFrozen(CONST.PHYSICS)).toBe(true);
+      expect(Object.isFrozen(CONST.FIELD.POSTS)).toBe(true);
+      expect(Object.isFrozen(CONST.FIELD.POSTS[0])).toBe(true);
     });
   });
 });
