@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@carlquest/shared": "*",
+    "colyseus.js": "^0.15.0",
     "three": "^0.165.0"
   },
   "devDependencies": {
