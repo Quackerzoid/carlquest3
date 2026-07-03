@@ -65,11 +65,10 @@ This section is the anti-hallucination ledger. It is the **only** trusted record
 
 ### 6.1 Current State (overwrite to reflect reality)
 
-- **Milestone:** 1 (scaffold) — complete, pending final branch review + merge.
-- **Last green commit:** c1649c5 (+ log/cleanup commits after) on branch `worktree-m1-scaffold`.
+- **Milestone:** 1 (scaffold) — COMPLETE: final review passed (0 critical/important), merged to main, tagged `m1-scaffold`. Next: Milestone 2 (PhysicsModule).
 - **Modules implemented:** `/shared` (types.ts: MatchPhase/MATCH_PHASES/Vec3; constants.ts: CONST.PHYSICS/FIELD/GAME, deep-frozen); `/server` (Colyseus bootstrap, empty `MatchRoom` maxClients 2, `MatchState` schema phase='LOBBY', shared app.config.ts, port 2567); `/client` (Vite + Three.js SceneModule: ground, batting/bowling squares, 4 posts, lights, camera — all geometry from CONST.FIELD). No game logic yet anywhere.
-- **Test status:** 38/38 passing (36 shared constants/phases, 2 server room), `npm run check` green (typecheck ×3 workspaces + ESLint + Vitest).
-- **Open worktrees/branches:** `.claude/worktrees/m1-scaffold` on `worktree-m1-scaffold` (this milestone; to be merged to main and tagged `m1-scaffold`).
+- **Test status:** 38/38 passing (36 shared constants/phases, 2 server room), `npm run check` green (typecheck ×3 workspaces + ESLint + Vitest) — re-verified on merged main (03c897a = tag `m1-scaffold`).
+- **Open worktrees/branches:** none — milestone worktree and branch removed after merge. Not pushed to origin (awaiting user direction).
 
 ### 6.2 Decisions Record (append-only)
 
