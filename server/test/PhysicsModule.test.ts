@@ -147,4 +147,53 @@ describe('PhysicsModule', () => {
       twin.dispose();
     });
   });
+
+  describe('Magnus curve (spec §9.2 acceptance)', () => {
+    const pitchVelocity = { x: 0, y: 0, z: -20 }; // bowling square towards the batter
+
+    it('a spinless pitch flies straight (no lateral drift)', () => {
+      physics.applyPitch({ velocity: pitchVelocity, angularVelocity: { x: 0, y: 0, z: 0 } });
+      run(physics, 0.35); // aloft the whole time from 1 m release
+      const { position } = physics.getBallState();
+      expect(Math.abs(position.x - CONST.FIELD.BOWLING_SQUARE.x)).toBeLessThan(1e-6);
+    });
+
+    it('a spun pitch deviates laterally from the spinless trajectory', () => {
+      physics.applyPitch({ velocity: pitchVelocity, angularVelocity: { x: 0, y: 0, z: 0 } });
+      run(physics, 0.35);
+      const straightX = physics.getBallState().position.x;
+
+      physics.applyPitch({
+        velocity: pitchVelocity,
+        angularVelocity: { x: 0, y: CONST.GAME.SPIN_MAX_RADS, z: 0 }, // max sidespin
+      });
+      run(physics, 0.35);
+      const curvedX = physics.getBallState().position.x;
+
+      // MAGNUS_K 0.0006 * (40 rad/s x 20 m/s) on 0.16 kg ~= 3 m/s^2 lateral;
+      // over 0.35 s that is ~0.18 m. Assert a conservative floor.
+      expect(Math.abs(curvedX - straightX)).toBeGreaterThan(0.1);
+    });
+
+    it('opposite spin curves the opposite way', () => {
+      physics.applyPitch({
+        velocity: pitchVelocity,
+        angularVelocity: { x: 0, y: CONST.GAME.SPIN_MAX_RADS, z: 0 },
+      });
+      run(physics, 0.35);
+      const rightX = physics.getBallState().position.x;
+
+      physics.applyPitch({
+        velocity: pitchVelocity,
+        angularVelocity: { x: 0, y: -CONST.GAME.SPIN_MAX_RADS, z: 0 },
+      });
+      run(physics, 0.35);
+      const leftX = physics.getBallState().position.x;
+
+      expect(Math.sign(rightX - CONST.FIELD.BOWLING_SQUARE.x)).not.toBe(0);
+      expect(Math.sign(rightX - CONST.FIELD.BOWLING_SQUARE.x)).toBe(
+        -Math.sign(leftX - CONST.FIELD.BOWLING_SQUARE.x),
+      );
+    });
+  });
 });
