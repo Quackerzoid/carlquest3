@@ -1,0 +1,150 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CONST } from '@carlquest/shared';
+import { createPhysicsModule, type PhysicsModule } from '../src/modules/PhysicsModule';
+
+const DT = CONST.PHYSICS.FIXED_TIMESTEP;
+
+/** Steps the module one fixed increment at a time for `seconds` of simulated time. */
+function run(physics: PhysicsModule, seconds: number): void {
+  const substeps = Math.round(seconds / DT);
+  for (let i = 0; i < substeps; i += 1) physics.step(DT);
+}
+
+describe('PhysicsModule', () => {
+  let physics: PhysicsModule;
+
+  beforeEach(async () => {
+    physics = await createPhysicsModule();
+  });
+
+  afterEach(() => {
+    physics.dispose();
+  });
+
+  describe('spawn and state', () => {
+    it('spawns the ball at the bowling square at release height by default', () => {
+      physics.spawnBall();
+      const { position } = physics.getBallState();
+      expect(position.x).toBeCloseTo(CONST.FIELD.BOWLING_SQUARE.x, 6);
+      expect(position.y).toBeCloseTo(CONST.PHYSICS.BALL_RELEASE_HEIGHT, 6);
+      expect(position.z).toBeCloseTo(CONST.FIELD.BOWLING_SQUARE.z, 6);
+    });
+
+    it('spawnBall zeroes velocities from a previous flight', () => {
+      physics.applyPitch({ velocity: { x: 5, y: 2, z: -10 }, angularVelocity: { x: 0, y: 30, z: 0 } });
+      run(physics, 0.2);
+      physics.spawnBall({ x: 1, y: 2, z: 3 });
+      const state = physics.getBallState();
+      expect(state.position).toEqual({ x: 1, y: 2, z: 3 });
+      expect(state.velocity).toEqual({ x: 0, y: 0, z: 0 });
+      expect(state.angularVelocity).toEqual({ x: 0, y: 0, z: 0 });
+    });
+
+    it('applyPitch spawns at the given origin and sets velocities', () => {
+      physics.applyPitch({
+        origin: { x: 0, y: 1.5, z: 5 },
+        velocity: { x: 0, y: 0, z: -20 },
+        angularVelocity: { x: 0, y: 40, z: 0 },
+      });
+      const state = physics.getBallState();
+      expect(state.position).toEqual({ x: 0, y: 1.5, z: 5 });
+      expect(state.velocity).toEqual({ x: 0, y: 0, z: -20 });
+      expect(state.angularVelocity).toEqual({ x: 0, y: 40, z: 0 });
+    });
+
+    it('applyHit replaces velocities without moving the ball', () => {
+      physics.spawnBall({ x: 0, y: 0.5, z: 0 });
+      physics.applyHit({ velocity: { x: 3, y: 8, z: 15 }, angularVelocity: { x: 0, y: 0, z: 10 } });
+      const state = physics.getBallState();
+      expect(state.position).toEqual({ x: 0, y: 0.5, z: 0 });
+      expect(state.velocity).toEqual({ x: 3, y: 8, z: 15 });
+    });
+  });
+
+  describe('stepping', () => {
+    it('gravity pulls a spawned ball downwards', () => {
+      physics.spawnBall({ x: 0, y: 5, z: 0 });
+      run(physics, 0.5);
+      const { position, velocity } = physics.getBallState();
+      expect(position.y).toBeLessThan(5);
+      expect(velocity.y).toBeLessThan(0);
+    });
+
+    it('step with zero or negative dt leaves state untouched', () => {
+      physics.spawnBall({ x: 0, y: 5, z: 0 });
+      const before = physics.getBallState();
+      physics.step(0);
+      physics.step(-1);
+      expect(physics.getBallState()).toEqual(before);
+    });
+
+    it('accumulates partial dt into whole fixed substeps', () => {
+      physics.spawnBall({ x: 0, y: 5, z: 0 });
+      // 40 calls of half a timestep = 20 whole substeps exactly
+      for (let i = 0; i < 40; i += 1) physics.step(DT / 2);
+      const twin = physics.getBallState();
+
+      physics.spawnBall({ x: 0, y: 5, z: 0 });
+      run(physics, 20 * DT);
+      // Same number of substeps from a fresh identical spawn: same trajectory
+      expect(physics.getBallState()).toEqual(twin);
+    });
+  });
+
+  describe('bounce and damping plausibility (spec §9.2)', () => {
+    it('bounces off the ground with decreasing apexes', () => {
+      const drop = 2;
+      physics.spawnBall({ x: 0, y: drop, z: 0 });
+      let bounced = false;
+      let apex1 = 0;
+      let descending = true;
+      for (let t = 0; t < 3; t += DT) {
+        physics.step(DT);
+        const { position, velocity } = physics.getBallState();
+        if (descending && velocity.y > 0.01) {
+          bounced = true;
+          descending = false;
+        }
+        if (!descending) {
+          if (position.y > apex1) apex1 = position.y;
+          if (velocity.y < -0.01 && apex1 > 0) break; // apex recorded, descending again
+        }
+      }
+      expect(bounced).toBe(true);
+      // Restitution 0.4 => ideal apex ratio e^2 = 0.16; wide tolerance for solver/damping
+      expect(apex1 / drop).toBeGreaterThan(0.05);
+      expect(apex1 / drop).toBeLessThan(0.4);
+    });
+
+    it('linear and angular damping bleed speed and spin in free flight', () => {
+      physics.applyPitch({
+        origin: { x: 0, y: 50, z: 0 },
+        velocity: { x: 10, y: 0, z: 0 },
+        angularVelocity: { x: 0, y: 0, z: 30 },
+      });
+      run(physics, 1);
+      const { velocity, angularVelocity } = physics.getBallState();
+      expect(velocity.x).toBeGreaterThan(0);
+      expect(velocity.x).toBeLessThan(10);
+      const spin = Math.hypot(angularVelocity.x, angularVelocity.y, angularVelocity.z);
+      expect(spin).toBeLessThan(30);
+      expect(spin).toBeGreaterThan(0);
+    });
+  });
+
+  describe('determinism', () => {
+    it('two identical modules produce bit-identical trajectories', async () => {
+      const twin = await createPhysicsModule();
+      const pitch = {
+        velocity: { x: 1.5, y: 3, z: -18 },
+        angularVelocity: { x: 5, y: 25, z: -3 },
+      };
+      physics.applyPitch(pitch);
+      twin.applyPitch(pitch);
+      run(physics, 300 * DT);
+      run(twin, 300 * DT);
+      expect(physics.getBallState()).toEqual(twin.getBallState());
+      twin.dispose();
+    });
+  });
+});

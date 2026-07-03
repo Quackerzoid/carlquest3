@@ -13,7 +13,8 @@
     "@colyseus/core": "^0.15.0",
     "@colyseus/schema": "^2.0.0",
     "@colyseus/tools": "^0.15.0",
-    "@colyseus/ws-transport": "^0.15.0"
+    "@colyseus/ws-transport": "^0.15.0",
+    "@dimforge/rapier3d-compat": "^0.14.0"
   },
   "devDependencies": {
     "@colyseus/testing": "^0.15.0",
