@@ -85,6 +85,7 @@ This section is the anti-hallucination ledger. It is the **only** trusted record
 | 2026-07-03 | Whale `WALL` blocker collider deferred to Milestone 4 | Spec §6 says "active during fielding"; FieldingModule doesn't exist until M4. |
 | 2026-07-03 | Ball collider uses `CoefficientCombineRule.Max` for restitution | Rapier default Average blends ball 0.4 with unset ground 0 → effective 0.2; Max makes the spec's 0.4 the effective coefficient. |
 | 2026-07-03 | `@dimforge/rapier3d-compat` pinned at ^0.14.0 | First Rapier usage; version recorded for determinism (same binary ⇒ same trajectories). |
+| 2026-07-03 | `placeBall` resets the step accumulator (pitch re-anchors substep phase) | Makes pitch trajectories independent of message arrival within a frame. The accumulator is WORLD time — MUST be revisited in M4 when fielder bodies join the world (final-review finding). |
 
 ### 6.3 Changelog (append-only, newest first)
 
@@ -114,3 +115,6 @@ Entry format:
 - Client `SceneModule.resize()` re-applies `setPixelRatio(window.devicePixelRatio)` per resize event — reviewed and kept (catches cross-monitor DPI changes; idempotent, cheap). Not a defect; noted so it isn't re-flagged.
 - `server/package.json` `build` script aliases typecheck (no emit config yet); real build wiring deferred until a milestone needs emitted server JS.
 - Client WebGL renders very slowly in the sandboxed preview browser (software rasteriser) — verification used headless Edge instead; real browsers are fine.
+- `isBallAtPost` is a discrete end-of-substep poll of Rapier's intersection graph: a very fast grazing pass can cross a sensor between poses and never register. Fine for M4 run-outs as designed (ball is delivered TO the post and stays/bounces); if fly-through detection is ever needed, switch to Rapier collision events (EventQueue) rather than widening the sensor.
+- `PhysicsModule.step()` has no catch-up clamp: a wall-clock caller that stalls would trigger a synchronous substep burst. MUST add an accumulator clamp (e.g. 0.25 s) when M3 wires MatchRoom's clock to `step()` — carry into the M3 plan.
+- The ball never sleeps: Magnus `resetForces`/`addForce` wakes it every substep even at rest. Harmless at one body / 60 Hz; skip near-zero forces if it ever matters.

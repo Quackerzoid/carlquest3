@@ -77,6 +77,11 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
     ballBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
     ballBody.resetForces(true);
     ballBody.resetTorques(true);
+    // Deliberate: re-anchor the substep phase to the spawn/pitch event, discarding
+    // any sub-timestep remainder (<1/60 s) so trajectories are independent of when
+    // the triggering message landed within a frame. The accumulator is WORLD time —
+    // revisit before other dynamic bodies join this world (Milestone 4), as resetting
+    // it on a pitch would then shift simulation time for every body. See CLAUDE.md §6.2.
     accumulator = 0;
   }
 
