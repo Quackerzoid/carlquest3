@@ -1,6 +1,7 @@
 {
   "name": "carlquest",
   "private": true,
+  "type": "module",
   "version": "0.1.0",
   "description": "Carl Quest Sports — multiplayer 3D rounders",
   "workspaces": ["shared", "server", "client"],
