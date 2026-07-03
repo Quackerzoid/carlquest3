@@ -108,7 +108,7 @@ client/src/SceneModule.ts    pitch, posts, batting/bowling squares, camera, ligh
 }
 ```
 
-(Note: the server workspace overrides `module`/`moduleResolution` — see Task 3 — because Colyseus + tsx run on Node module resolution, not bundler resolution.)
+(Note: AMENDED during execution — the server workspace KEEPS the base Bundler/ESNext resolution. The originally planned NodeNext override broke extensionless source-level `@carlquest/shared` imports and `@colyseus/tools` CJS interop under tsx. See Task 3 report, controller adjudication.)
 
 - [ ] **Step 3: Write `eslint.config.js`**
 
