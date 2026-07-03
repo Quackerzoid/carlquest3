@@ -262,7 +262,21 @@ export class MatchRoom extends Room<MatchState> {
       // the crossing latches — without this snapshot, a ball that crossed the
       // exposed post's sensor and was gathered in the same tick would erase
       // its own run-out evidence (M4 final-review minor 3).
-      const crossedExposedPost = preExposed !== null && this.physics.wasBallAtPost(preExposed - 1);
+      //
+      // The snapshot is honoured ONLY while exposure is ALSO unchanged since
+      // the LAST check (preExposed === lastExposedPost, compared here before
+      // checkRunOut overwrites it): exposure can change BETWEEN ticks via a
+      // runDecision message — e.g. go:true from a halt flips exposure
+      // null → 2 outside any tick — and on the first tick of that new window
+      // the latch may hold a crossing that PREDATES the window (the ball
+      // rolled through the post while the runner sat halted; nothing clears
+      // latches while exposure is null). Reading it before checkRunOut's
+      // transition-clear would resurrect exactly the stale-crossing false
+      // run-out that clear exists to prevent (final-review round 2).
+      const crossedExposedPost =
+        preExposed !== null &&
+        preExposed === this.lastExposedPost &&
+        this.physics.wasBallAtPost(preExposed - 1);
       const fieldingEvent = this.fielding.tick(dt, state, this.state.ballLive, preExposed);
       this.running.tick(dt);
 
@@ -315,9 +329,12 @@ export class MatchRoom extends Room<MatchState> {
     if (exposed === null) return null;
     // Pre-fielding snapshot: the ball crossed this post's sensor earlier in
     // THIS tick and may since have been gathered (holdBallAt → placeBall
-    // clears the latches). Honoured only while the exposure is unchanged
-    // across the tick — if the runner reached the post in the same tick, the
-    // photo-finish still resolves in the runner's favour (CLAUDE.md §6.4).
+    // clears the latches). Honoured only while the exposure is unchanged both
+    // since the LAST check (guarded at the snapshot site against a
+    // between-tick runDecision opening a new exposure window over a stale
+    // latch) and across THIS tick — if the runner reached the post in the
+    // same tick, the photo-finish still resolves in the runner's favour
+    // (CLAUDE.md §6.4).
     if (exposed === preExposed && crossedPreFielding) return exposed;
     const postIndex = exposed - 1; // physics posts are 0-based; posts 1-4 in the running/schema domain
     if (this.physics.wasBallAtPost(postIndex)) return exposed;

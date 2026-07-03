@@ -398,6 +398,80 @@ describe('MatchRoom', () => {
     }
   }, 20000);
 
+  it('a crossing while the runner is HALTED does not run them out on the later go', async () => {
+    // Regression (final-review round 2): the runner halts safely at post 1
+    // (the halt transition clears the latches and sets lastExposedPost null);
+    // while they sit there, the still-live ball rolls THROUGH post 2's sensor
+    // and out the far side — the latch is set and NOTHING clears it, because
+    // exposure stays null. The go decision then arrives BETWEEN ticks
+    // (runDecision handler), flipping exposure null → 2 outside any tick. On
+    // the next tick the pre-fielding snapshot must NOT honour that stale
+    // latch: the crossing predates the post-2 exposure window, so running the
+    // runner out from it would be wrongful (the ball is long gone).
+    //
+    // Vehicle: a deliberately WEAK hit — the swing is sent only once the ball
+    // is well past the batting plane (z < −3.3, a real ~9-tick timing error),
+    // so the exit speed collapses to ~5-12 m/s and the ball ROLLS up the line
+    // through post 2, arriving ~2-4 s in — comfortably after the halted
+    // runner reached post 1 at ~1.84 s. ALWAYS_MISS keeps every fielder's
+    // hands off it. The slowest sub-tick jitter band can instead time the
+    // play out before the ball arrives; that path degrades to a vacuous but
+    // still-green pass of the same assertion (the RED evidence in the task-7
+    // report pins that the repro band is what actually runs).
+    const post2 = FIELD.POSTS[1];
+    if (post2 === undefined) throw new Error('no post 2 in fixture');
+    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
+    const client = await colyseus.connectTo(room);
+
+    client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+    let sawInFlight = false;
+    for (let i = 0; i < 180; i += 1) {
+      await room.waitForNextSimulationTick();
+      if (!room.state.ballLive) continue;
+      if (room.state.ball.z > 1) sawInFlight = true;
+      if (sawInFlight && room.state.ball.z < -3.3) break; // deliberately LATE (weak hit)
+    }
+    const dt = CONST.PHYSICS.FIXED_TIMESTEP;
+    const cx = room.state.ball.x + room.state.ball.vx * dt;
+    const cz = room.state.ball.z + room.state.ball.vz * dt;
+    client.send('swing', { timing: 0, aim: { x: post2.x - cx, y: 0, z: post2.z - cz }, spinInput: 0 });
+    await room.waitForNextSimulationTick();
+    expect(room.state.demoLog).toContain('hit'); // the late swing must still connect
+    client.send('runDecision', { go: false }); // halt at post 1
+
+    let halted = false;
+    for (let i = 0; i < 300 && room.state.ballLive && !halted; i += 1) {
+      await room.waitForNextSimulationTick();
+      if (room.state.runner.atPost === 1 && !room.state.runner.running) halted = true;
+    }
+    expect(halted).toBe(true);
+
+    // Wait until the ball has passed THROUGH the sensor and gone (its path
+    // runs within ~0.2 m of the post, so distance > radius + 0.3 with z past
+    // the post means genuinely through and out, not still inside).
+    let passed = false;
+    for (let i = 0; i < 600 && room.state.ballLive && !passed; i += 1) {
+      await room.waitForNextSimulationTick();
+      const dx = room.state.ball.x - post2.x;
+      const dz = room.state.ball.z - post2.z;
+      if (room.state.ball.z > post2.z && Math.hypot(dx, dz) > FIELD.POST_SENSOR_RADIUS + 0.3) passed = true;
+    }
+
+    if (passed) {
+      client.send('runDecision', { go: true }); // exposure flips null → 2 between ticks
+      for (let i = 0; i < 240 && room.state.ballLive; i += 1) {
+        await room.waitForNextSimulationTick();
+      }
+    }
+    // However the play ends (safe mid-run at timeout, rounder, …), the stale
+    // while-halted crossing must never have produced a run-out.
+    expect(room.state.runner.out).toBe(false);
+    if (!room.state.ballLive && room.state.lastOutcome !== '') {
+      const outcome = JSON.parse(room.state.lastOutcome) as PlayOutcome;
+      expect(outcome.kind).not.toBe('runOut');
+    }
+  }, 30000);
+
   it('a hit flown straight at the bowler is caught (pre-bounce)', async () => {
     // Aimed straight back down the pitch line at the bowler with a
     // guaranteed-catch rng: the ball flies flat into a fielder's catch radius
@@ -456,6 +530,9 @@ describe('MatchRoom', () => {
     //   margin on every leg, so this is single-attempt deterministic. The hit
     //   ball itself never goes near post 1 (its line is x ≈ 0; post 1 is at
     //   x = 11), so a runOut at post 1 can ONLY be the thrown ball.
+    // roomRef is late-bound (the rng must exist before createRoom returns the
+    // room), but this is not a use-before-assign hazard: rolls only occur
+    // mid-play — fielding is gated on a live runner, long after roomRef is set.
     let roomRef: TestRoom | null = null;
     const corridorGatherRng = (): number => {
       const b = roomRef?.state.ball; // written earlier in the same tick as the roll
