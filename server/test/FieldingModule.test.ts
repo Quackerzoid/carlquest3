@@ -238,6 +238,24 @@ describe('catch evaluation', () => {
     expect(m.holderId()).toBe('carl');
   });
 
+  it('reads hasBounced BEFORE parking the ball (holdBallAt resets bounce tracking)', () => {
+    // Regression (M4 final-review round): the room binds holdBallAt to
+    // physics.spawnBall, whose placeBall resets the bounce flag — evaluating
+    // hasBounced() only after holdBallAt() misclassified every post-bounce
+    // pickup as a pre-bounce 'caught' (a wrongful out). Couple the stubs the
+    // way the real PhysicsModule couples them to pin the read order.
+    const h = makeDeps([0]);
+    h.bounced.value = true;
+    const parkAndReset = h.deps.holdBallAt;
+    h.deps.holdBallAt = (p) => {
+      h.bounced.value = false; // exactly what placeBall does
+      parkAndReset(p);
+    };
+    const m = createFieldingModule([at(carl, 5, 5)], h.deps);
+    const event = m.tick(DT, ball(vec(5, PHYSICS.BALL_RELEASE_HEIGHT, 5)), true, null);
+    expect(event).toEqual({ kind: 'gathered', by: 'carl' });
+  });
+
   it('a failed roll produces no event and no holder', () => {
     const h = makeDeps([0.999]); // Carl pCatch ≤ 0.72 → miss
     const m = createFieldingModule([at(carl, 5, 5)], h.deps);

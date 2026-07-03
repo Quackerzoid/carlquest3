@@ -285,8 +285,13 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
           f.hasBall = true;
           holder = f;
           holdTime = 0;
+          // Read the bounce state BEFORE parking: holdBallAt is bound to
+          // physics.spawnBall in the room, and placeBall resets the bounce
+          // flag — reading it afterwards misclassified every post-bounce
+          // pickup as a pre-bounce catch (M4 final-review regression).
+          const bouncedBeforePark = deps.hasBounced();
           deps.holdBallAt(hands); // park immediately so physics cannot fly the ball onwards
-          event = deps.hasBounced()
+          event = bouncedBeforePark
             ? { kind: 'gathered', by: f.character.id }
             : { kind: 'caught', by: f.character.id };
         }

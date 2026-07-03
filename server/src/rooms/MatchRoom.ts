@@ -40,11 +40,15 @@ const FIELDING_SIDE: FielderSetup[] = CHARACTERS.filter((c) => c.id !== DEMO_BAT
 type SwingMessage = SwingInput & { timing: number };
 
 /**
- * Room creation options. `rng`/`seed` are test-only deterministic injection
- * points (plan §Global Constraints: no hunting for magic seeds) — production
- * always falls through to `seed ?? Date.now()`, the one permissible
- * wall-clock read (it parameterises fielding randomness, not the physics
- * simulation itself — logged in CLAUDE.md §6.2).
+ * Room creation options. `rng`/`seed` are deterministic injection points used
+ * by tests, but they are CLIENT-REACHABLE in the M4 demo: `joinOrCreate`
+ * forwards the creating client's options object to onCreate, so these
+ * compile-time types are advisory only and each field is runtime-validated in
+ * onCreate (a live client CAN pass a numeric `seed`, making catch rolls
+ * predictable — accepted for the demo, same trust class as the any-client
+ * runDecision, pending M6/M7 role gating; see CLAUDE.md §6.2/§6.4). The
+ * fallback `Date.now()` is the one permissible wall-clock read (it seeds
+ * fielding randomness, not the physics simulation itself).
  */
 interface MatchRoomOptions {
   rng?: () => number;
@@ -100,8 +104,13 @@ export class MatchRoom extends Room<MatchState> {
     this.setState(new MatchState());
     this.physics = await createPhysicsModule();
 
-    const seed = options.seed ?? Date.now();
-    const rng = options.rng ?? createRng(seed);
+    // Join options are wire data (joinOrCreate forwards a client's options
+    // object here), so runtime-validate before use: a non-function `rng`
+    // would throw inside the simulation interval on every catch-radius entry,
+    // and a non-finite `seed` would poison createRng. Junk falls through to
+    // the server's own wall-clock seed.
+    const seed = isFiniteNumber(options.seed) ? options.seed : Date.now();
+    const rng = typeof options.rng === 'function' ? options.rng : createRng(seed);
     this.fielding = createFieldingModule(FIELDING_SIDE, {
       rng,
       hasBounced: () => this.physics.hasBounced(),
@@ -247,11 +256,18 @@ export class MatchRoom extends Room<MatchState> {
       // Fielding sees the runner's pre-tick target (this tick's chase/cover
       // decision); the run-out check below re-reads exposedPost() AFTER
       // running.tick, per plan order.
-      const fieldingEvent = this.fielding.tick(dt, state, this.state.ballLive, this.running.exposedPost());
+      const preExposed = this.running.exposedPost();
+      // Snapshot the exposed post's crossing latch BEFORE fielding runs: a
+      // same-tick gather parks the ball (holdBallAt → placeBall), which clears
+      // the crossing latches — without this snapshot, a ball that crossed the
+      // exposed post's sensor and was gathered in the same tick would erase
+      // its own run-out evidence (M4 final-review minor 3).
+      const crossedExposedPost = preExposed !== null && this.physics.wasBallAtPost(preExposed - 1);
+      const fieldingEvent = this.fielding.tick(dt, state, this.state.ballLive, preExposed);
       this.running.tick(dt);
 
       const atRestOrTimedOut = this.updateRestTracking(state);
-      const outcome = this.resolveOutcome(fieldingEvent, atRestOrTimedOut);
+      const outcome = this.resolveOutcome(fieldingEvent, atRestOrTimedOut, preExposed, crossedExposedPost);
       if (outcome !== null) {
         this.endPlay(outcome);
       }
@@ -286,7 +302,7 @@ export class MatchRoom extends Room<MatchState> {
    * latched per substep, so a fast fly-through between ticks is never lost, per
    * CLAUDE.md §6.4) OR the ball's current holder is standing within range of it.
    */
-  private checkRunOut(): number | null {
+  private checkRunOut(preExposed: number | null, crossedPreFielding: boolean): number | null {
     const exposed = this.running.exposedPost();
     if (exposed !== this.lastExposedPost) {
       // Exposure changed since the last check (runner set off from a post,
@@ -297,6 +313,12 @@ export class MatchRoom extends Room<MatchState> {
       this.lastExposedPost = exposed;
     }
     if (exposed === null) return null;
+    // Pre-fielding snapshot: the ball crossed this post's sensor earlier in
+    // THIS tick and may since have been gathered (holdBallAt → placeBall
+    // clears the latches). Honoured only while the exposure is unchanged
+    // across the tick — if the runner reached the post in the same tick, the
+    // photo-finish still resolves in the runner's favour (CLAUDE.md §6.4).
+    if (exposed === preExposed && crossedPreFielding) return exposed;
     const postIndex = exposed - 1; // physics posts are 0-based; posts 1-4 in the running/schema domain
     if (this.physics.wasBallAtPost(postIndex)) return exposed;
     // The event latch fires on sensor ENTRY; a ball already resting inside the
@@ -314,11 +336,16 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   /** First-outcome-wins resolution, in plan priority order: caught, runOut, rounder, safe. */
-  private resolveOutcome(fieldingEvent: FieldingEvent | null, atRestOrTimedOut: boolean): PlayOutcome | null {
+  private resolveOutcome(
+    fieldingEvent: FieldingEvent | null,
+    atRestOrTimedOut: boolean,
+    preExposed: number | null,
+    crossedExposedPost: boolean,
+  ): PlayOutcome | null {
     if (fieldingEvent !== null && fieldingEvent.kind === 'caught') {
       return { kind: 'caught', by: fieldingEvent.by };
     }
-    const runOutPost = this.checkRunOut();
+    const runOutPost = this.checkRunOut(preExposed, crossedExposedPost);
     if (runOutPost !== null) {
       return { kind: 'runOut', atPost: runOutPost };
     }

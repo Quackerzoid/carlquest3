@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { boot, ColyseusTestServer } from '@colyseus/testing';
 import type { Room } from '@colyseus/core';
 import type { Room as ClientRoom } from 'colyseus.js';
@@ -43,6 +43,7 @@ describe('MatchRoom', () => {
     // physics catch-up clamp (SIM_MAX_CATCHUP) skip clean over a discrete
     // post-sensor poll — observed as rare flakiness in the run-out test.
     await colyseus.cleanup();
+    vi.restoreAllMocks();
   });
 
   it('boots and lets a client join the match room in LOBBY phase', async () => {
@@ -225,6 +226,7 @@ describe('MatchRoom', () => {
     client: TestClient,
     target: { x: number; z: number },
     lateTicks: number,
+    aimY = 0,
   ): Promise<void> {
     client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
     await waitNearPlane(room);
@@ -237,12 +239,16 @@ describe('MatchRoom', () => {
     // position therefore launches the hit off a parallel line, missing the post
     // by the perpendicular component of that drift (≈0.4 m — right at the 0.5 m
     // sensor edge). Aim from the predicted one-tick-ahead contact point instead,
-    // which cancels the bulk of that offset. (Residual sub-tick jitter is what
-    // the small retry in the caller absorbs.)
+    // which cancels the bulk of that offset. (Residual sub-tick jitter is small
+    // enough that every caller is single-attempt — all retries were removed.)
+    //
+    // `aimY` sets the vertical aim component; the default 0 is a flat drive.
+    // A very large negative value is clamped by HitModule to exactly
+    // GAME.HIT_ELEVATION_MIN_DEG (−10°), giving a deterministic downward hit.
     const dt = CONST.PHYSICS.FIXED_TIMESTEP;
     const cx = room.state.ball.x + room.state.ball.vx * dt;
     const cz = room.state.ball.z + room.state.ball.vz * dt;
-    client.send('swing', { timing: 0, aim: { x: target.x - cx, y: 0, z: target.z - cz }, spinInput: 0 });
+    client.send('swing', { timing: 0, aim: { x: target.x - cx, y: aimY, z: target.z - cz }, spinInput: 0 });
     await room.waitForNextSimulationTick();
   }
 
@@ -425,4 +431,107 @@ describe('MatchRoom', () => {
     expect(room.state.ballLive).toBe(false);
     expect(received).toEqual(outcome);
   }, 20000);
+
+  it('a gathered ball is thrown to the exposed post for a run-out (full throw pipeline)', async () => {
+    // End-to-end marquee pipeline: hit → bounce → fielder gathers (post-bounce)
+    // → THROW_RELEASE_DELAY_S hold → applyThrow → thrown ball crosses the
+    // exposed post's sensor → runOut. Deterministic geometry:
+    //
+    // - The hit is aimed at the BOWLING_SQUARE with a huge negative aimY, which
+    //   HitModule clamps to exactly −10° elevation — the ball dives into the
+    //   ground ≤ 3.7 m out and hops down the x = 0 line into Kian's radius
+    //   (entry at z ≥ ~4.4: he advances ~1 m while the ball covers ~5 m, and a
+    //   near-plane contact caps the bounce distance), so Kian's entry is
+    //   always post-bounce → a GATHER, never a catch.
+    // - The rng is scripted by SERVER STATE, not call order (contact can land
+    //   just behind the plane, inside the backstop Laurie's 2.78 m radius, so
+    //   whether she rolls first is sub-tick jitter): a roll wins exactly when
+    //   the ball is in the mid-corridor gather zone (|x| < 1, z > 2). Laurie's
+    //   roll happens at the contact point (z ≤ 0.5) and the post-1 cover
+    //   fielder's (Josh's) at x ≈ 9 during the throw — both miss — while
+    //   Kian's gather (x ≈ 0, z ≥ ~4.4) is the only roll inside the zone.
+    // - Kian gathers ~11 m from post 1 while the runner (6.35 m/s over 11.7 m,
+    //   arriving ~1.84 s) is barely a third of the way there; after the 0.5 s
+    //   release delay his 26.4 m/s throw reaches post 1 at ~1.2 s — a ≥ 35-tick
+    //   margin on every leg, so this is single-attempt deterministic. The hit
+    //   ball itself never goes near post 1 (its line is x ≈ 0; post 1 is at
+    //   x = 11), so a runOut at post 1 can ONLY be the thrown ball.
+    let roomRef: TestRoom | null = null;
+    const corridorGatherRng = (): number => {
+      const b = roomRef?.state.ball; // written earlier in the same tick as the roll
+      return b !== undefined && Math.abs(b.x) < 1 && b.z > 2 ? 0 : 0.999;
+    };
+    const room = await colyseus.createRoom('match', { rng: corridorGatherRng });
+    roomRef = room;
+    const client = await colyseus.connectTo(room);
+    let received: PlayOutcome | null = null;
+    client.onMessage('playOutcome', (payload: PlayOutcome) => {
+      received = payload;
+    });
+
+    await pitchThenSwingAtTarget(room, client, FIELD.BOWLING_SQUARE, 0, -1000);
+
+    const holders = new Set<string>();
+    let outcome: PlayOutcome | null = null;
+    for (let i = 0; i < 180 && outcome === null; i += 1) {
+      await room.waitForNextSimulationTick();
+      for (const f of room.state.fielders.values()) {
+        if (f.hasBall) holders.add(f.id);
+      }
+      if (!room.state.ballLive) outcome = JSON.parse(room.state.lastOutcome) as PlayOutcome;
+    }
+    // The 'playOutcome' broadcast reaches the client a moment after the
+    // server-side state is already updated; give it one more tick to land.
+    await room.waitForNextSimulationTick();
+
+    // The ball was held (gathered, then thrown) — this run-out is the throw's.
+    expect([...holders]).toEqual(['kian']);
+    expect(outcome).toEqual({ kind: 'runOut', atPost: 1 });
+    expect(room.state.ballLive).toBe(false);
+    expect(received).toEqual(outcome);
+  }, 20000);
+
+  it('garbage rng/seed join options cannot break the room (runtime-validated)', async () => {
+    // Room-creation options arrive off the wire (any client's joinOrCreate
+    // options object reaches onCreate), so the compile-time shape is advisory:
+    // a non-function `rng` must not throw inside the simulation interval and a
+    // non-numeric `seed` must not poison the catch rolls — the room must
+    // validate at runtime and fall through to its own wall-clock-seeded rng.
+    const errorSpy = vi.spyOn(console, 'error');
+    const garbage = { rng: 1, seed: 'not-a-number' } as unknown as Record<string, unknown>;
+    const room = await colyseus.createRoom('match', garbage);
+    const client = await colyseus.connectTo(room);
+
+    // Pitch still works with stat-derived speed…
+    client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+    for (let i = 0; i < 30; i += 1) {
+      await room.waitForNextSimulationTick();
+      if (room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0) break;
+    }
+    expect(room.state.ballLive).toBe(true);
+    const speed = Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
+    expect(speed).toBeGreaterThan(20);
+    expect(speed).toBeLessThan(27);
+
+    // …and a connected swing back down the pitch line drives the ball through
+    // Kian's catch radius, forcing real deps.rng() calls. The fallback rng is
+    // wall-clock seeded, so WHICH outcome resolves is deliberately unpinned;
+    // what this asserts is that the play keeps simulating and terminates
+    // (worst case rest/timeout) instead of erroring in the tick loop.
+    await waitNearPlane(room);
+    client.send('swing', { timing: 0, aim: { x: 0, y: 0, z: 1 }, spinInput: 0 });
+    let ended = false;
+    for (let i = 0; i < 600 && !ended; i += 1) {
+      await room.waitForNextSimulationTick();
+      if (!room.state.ballLive) ended = true;
+    }
+    expect(ended).toBe(true);
+    const outcome = JSON.parse(room.state.lastOutcome) as PlayOutcome;
+    expect(['caught', 'runOut', 'rounder', 'safe']).toContain(outcome.kind);
+    // No tick-loop exceptions were swallowed along the way.
+    const uncaught = errorSpy.mock.calls.filter(
+      (args) => typeof args[0] === 'string' && args[0].includes('[MatchRoom] uncaught exception'),
+    );
+    expect(uncaught).toEqual([]);
+  }, 30000);
 });
