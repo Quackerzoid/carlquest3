@@ -65,10 +65,10 @@ This section is the anti-hallucination ledger. It is the **only** trusted record
 
 ### 6.1 Current State (overwrite to reflect reality)
 
-- **Milestone:** 1 (scaffold) — COMPLETE: final review passed (0 critical/important), merged to main, tagged `m1-scaffold`. Next: Milestone 2 (PhysicsModule).
-- **Modules implemented:** `/shared` (types.ts: MatchPhase/MATCH_PHASES/Vec3; constants.ts: CONST.PHYSICS/FIELD/GAME, deep-frozen); `/server` (Colyseus bootstrap, empty `MatchRoom` maxClients 2, `MatchState` schema phase='LOBBY', shared app.config.ts, port 2567); `/client` (Vite + Three.js SceneModule: ground, batting/bowling squares, 4 posts, lights, camera — all geometry from CONST.FIELD). No game logic yet anywhere.
-- **Test status:** 38/38 passing (36 shared constants/phases, 2 server room), `npm run check` green (typecheck ×3 workspaces + ESLint + Vitest) — re-verified on merged main (03c897a = tag `m1-scaffold`).
-- **Open worktrees/branches:** none — milestone worktree and branch removed after merge. Not pushed to origin (awaiting user direction).
+- **Milestone:** 2 (PhysicsModule) — complete on branch, pending final branch review + merge + tag `m2-physics`. (M1 merged and tagged `m1-scaffold`.)
+- **Modules implemented:** `/shared` (MatchPhase/MATCH_PHASES/Vec3 + PitchParams/HitParams/BallState; deep-frozen CONST.PHYSICS/FIELD/GAME); `/server` (Colyseus bootstrap, empty `MatchRoom`; **PhysicsModule**: Rapier world via async `createPhysicsModule()`, ground top at y=0, ball with CCD/mass 0.16/restitution 0.4 (Max combine rule), 4 posts + run-out sensors, fixed 1/60 accumulator stepping, Magnus `F = MAGNUS_K·(ω×v)` per substep, `spawnBall/applyPitch/applyHit/step/getBallState/isBallAtPost/dispose`); `/client` (Three.js scene, render-only). No pitch/hit/rules logic yet.
+- **Test status:** 57/57 passing (39 shared, 16 PhysicsModule incl. §9.2 Magnus acceptance + bounce/damping + exact-equality determinism, 2 room); `npm run check` green.
+- **Open worktrees/branches:** `.claude/worktrees/m2-physics` on `worktree-m2-physics` (to be merged + tagged). Not pushed to origin (awaiting user direction).
 
 ### 6.2 Decisions Record (append-only)
 
@@ -81,6 +81,10 @@ This section is the anti-hallucination ledger. It is the **only** trusted record
 | 2026-07-03 | Server tsconfig keeps base Bundler/ESNext resolution (plan said NodeNext override) | NodeNext broke extensionless source-level `@carlquest/shared` imports and `@colyseus/tools` CJS interop under tsx. |
 | 2026-07-03 | `server/src/app.config.ts` exports a typed plain `ConfigOptions` object rather than calling `@colyseus/tools` `config()` | The default-import `config()` call crashes under real Node ESM (CJS interop); invariant kept: one config shared by index.ts and @colyseus/testing. |
 | 2026-07-03 | `server/vitest.config.ts` pins `pool: 'threads'` | Vitest 2.1.9 forks pool crashes on Windows IPC. |
+| 2026-07-03 | M2 new tunables: `BALL_RELEASE_HEIGHT = 1.0`, `GROUND_THICKNESS = 0.1`, `POST_SENSOR_RADIUS = 0.5` | Spec §6 silent on these; needed for spawn default, cuboid ground, run-out sensors. |
+| 2026-07-03 | Whale `WALL` blocker collider deferred to Milestone 4 | Spec §6 says "active during fielding"; FieldingModule doesn't exist until M4. |
+| 2026-07-03 | Ball collider uses `CoefficientCombineRule.Max` for restitution | Rapier default Average blends ball 0.4 with unset ground 0 → effective 0.2; Max makes the spec's 0.4 the effective coefficient. |
+| 2026-07-03 | `@dimforge/rapier3d-compat` pinned at ^0.14.0 | First Rapier usage; version recorded for determinism (same binary ⇒ same trajectories). |
 
 ### 6.3 Changelog (append-only, newest first)
 
@@ -92,6 +96,11 @@ Entry format:
 - Verified: exact command(s) run + result (e.g. `npm run check` → 0 errors, 42 tests passed)
 - Notes/deviations: anything the spec didn't cover, or "none"
 ```
+
+### 2026-07-03 — [Milestone 2] PhysicsModule (Tasks 1–5)
+- Changed: shared/src/types.ts (+PitchParams/HitParams/BallState), shared/src/constants.ts (+3 tunables), shared/test/constants.test.ts (39 tests); server/package.json (+@dimforge/rapier3d-compat@0.14.0); server/src/modules/PhysicsModule.ts (new); server/test/PhysicsModule.test.ts (16 tests).
+- Verified: `npm run check` → typecheck ×3 clean, ESLint clean, 57/57 tests. §9.2 acceptance: spun pitch deviates >0.1 m laterally vs spinless (which drifts <1e-6); opposite spin curves opposite; bounce apex ratio in (0.05, 0.4); damping bleeds speed and spin; determinism = exact float equality over 300 substeps between twin modules.
+- Notes/deviations: restitution combine rule Max (see §6.2); `spawnBallAt` free function instead of `this.spawnBall` in the factory literal (strict-mode `this` typing); each task independently reviewed (all approved, 0 critical/important findings).
 
 ### 2026-07-03 — [Milestone 1] Monorepo scaffold (Tasks 1–5)
 - Changed: root workspace (package.json, tsconfig.base.json, eslint.config.js, .prettierrc.json, vitest.workspace.ts, README.md, .gitignore); shared/ (package.json, tsconfig.json, src/{index,types,constants}.ts, test/constants.test.ts); server/ (package.json, tsconfig.json, vitest.config.ts, src/{index,app.config}.ts, src/rooms/{MatchRoom,MatchState}.ts, test/MatchRoom.test.ts); client/ (package.json, tsconfig.json, vite.config.ts, index.html, src/{main,SceneModule}.ts); .claude/launch.json; plan doc amendments.
