@@ -289,6 +289,36 @@ describe('PhysicsModule', () => {
       expect(() => physics.wasBallAtPost(4)).toThrow(RangeError);
       expect(() => physics.wasBallAtPost(-1)).toThrow(RangeError);
     });
+
+    it('clearPostCrossings discards latched crossings without blocking future ones', () => {
+      // The room scopes run-out detection to the runner's current exposure
+      // window: a crossing latched BEFORE the runner became exposed to a post
+      // must not run them out later, so the room clears the latch on exposure
+      // change — but a crossing DURING (or after) the clear must still register.
+      physics.applyPitch({
+        origin: { x: post0.x - 2, y: postY, z: post0.z },
+        velocity: { x: 20, y: 0, z: 0 },
+        angularVelocity: { x: 0, y: 0, z: 0 },
+      });
+      physics.step(0.2); // full transit: crossing latched
+      expect(physics.wasBallAtPost(0)).toBe(true);
+      physics.clearPostCrossings();
+      expect(physics.wasBallAtPost(0)).toBe(false);
+
+      // Clearing mid-flight, before the sensor, must not lose the coming
+      // crossing: spawn 2 m short (sensor edge 1.5 m away), advance 0.05 s
+      // (1 m at 20 m/s — still short of it), clear, then finish the transit.
+      physics.applyPitch({
+        origin: { x: post0.x - 2, y: postY, z: post0.z },
+        velocity: { x: 20, y: 0, z: 0 },
+        angularVelocity: { x: 0, y: 0, z: 0 },
+      });
+      physics.step(0.05);
+      expect(physics.wasBallAtPost(0)).toBe(false); // not yet reached the sensor
+      physics.clearPostCrossings();
+      physics.step(0.2); // now flies through
+      expect(physics.wasBallAtPost(0)).toBe(true); // post-clear crossing still captured
+    });
   });
 
   describe('bounce tracking (spec §8 caught-before-bounce)', () => {

@@ -85,6 +85,16 @@ export class MatchRoom extends Room<MatchState> {
   private swung = false;
   private liveSince = 0;
   private restSince: number | null = null;
+  /**
+   * The exposedPost() value at the last run-out check. When exposure changes
+   * (runner sets off from a post, passes one, halts, or is exposed for the
+   * first time), the physics crossing latches are cleared so that only
+   * crossings DURING the current exposure window can trigger a run-out — a
+   * crossing that predates the exposure (e.g. the hit flew through post 2
+   * early in flight, and the runner only later set off for post 2) must not
+   * count. See checkRunOut and CLAUDE.md §6.2 (task-5 fix round 2).
+   */
+  private lastExposedPost: number | null = null;
 
   override async onCreate(options: MatchRoomOptions = {}): Promise<void> {
     this.setState(new MatchState());
@@ -173,6 +183,11 @@ export class MatchRoom extends Room<MatchState> {
     }
     this.physics.applyHit(result.params);
     this.running.startRun(DEMO_BATTER);
+    // The first exposure window (post 1) opens here, and applyHit has just
+    // cleared the crossing latches — record it now so the first checkRunOut
+    // does not treat it as an exposure CHANGE and discard a legitimate
+    // crossing from the very first tick of flight.
+    this.lastExposedPost = this.running.exposedPost();
     this.state.demoLog = `hit! timing factor ${result.timingFactor.toFixed(2)}`;
   }
 
@@ -273,9 +288,21 @@ export class MatchRoom extends Room<MatchState> {
    */
   private checkRunOut(): number | null {
     const exposed = this.running.exposedPost();
+    if (exposed !== this.lastExposedPost) {
+      // Exposure changed since the last check (runner set off from a post,
+      // passed one, or halted): crossings latched before this exposure began
+      // must not count — the rule is "ball at the exposed post WHILE exposed",
+      // not "ball has ever touched that post this play segment".
+      this.physics.clearPostCrossings();
+      this.lastExposedPost = exposed;
+    }
     if (exposed === null) return null;
     const postIndex = exposed - 1; // physics posts are 0-based; posts 1-4 in the running/schema domain
     if (this.physics.wasBallAtPost(postIndex)) return exposed;
+    // The event latch fires on sensor ENTRY; a ball already resting inside the
+    // sensor when this exposure window opened re-fires no event (and the clear
+    // above just discarded its entry), so also poll the current intersection.
+    if (this.physics.isBallAtPost(postIndex)) return exposed;
     const holderId = this.fielding.holderId();
     if (holderId === null) return null;
     const holder = this.fielding.getFielders().find((f) => f.id === holderId);
@@ -323,6 +350,7 @@ export class MatchRoom extends Room<MatchState> {
     this.fielding.reset();
     this.running.reset();
     this.restSince = null;
+    this.lastExposedPost = null;
   }
 
   private syncFielders(): void {

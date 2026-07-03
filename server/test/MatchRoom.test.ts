@@ -350,47 +350,79 @@ describe('MatchRoom', () => {
     expect(bowler?.z).toBeCloseTo(FIELD.BOWLING_SQUARE.z, 9);
   }, 20000);
 
-  it('a hit flown straight at the bowler is caught (pre-bounce)', async () => {
-    // Aimed straight back down the pitch line at Kian (the bowler, slot 0) with a
-    // guaranteed-catch rng, so a fielder catches pre-bounce and the play resolves
-    // `caught`. This is the ONE test that keeps a minimal retry, and it is not
-    // about detection: outcome resolution and the pre-bounce catch are exercised
-    // every attempt. The residual nondeterminism is purely WHICH fielder is
-    // nearest the ball at the contact tick — `waitForNextSimulationTick` is a
-    // fixed timer, not a per-tick barrier (@colyseus/testing's Room.ext.js), so a
-    // swing that lands a sub-tick late puts contact slightly behind the plane,
-    // occasionally inside the long-reach backstop (Laurie)'s radius before Kian's.
-    // A fresh-room retry re-samples that message-landing jitter; the run-out test
-    // above needs no retry because event-accurate wasBallAtPost removed the only
-    // detection-side flake.
-    const isKianCatch = (o: PlayOutcome | null): boolean => o?.kind === 'caught' && o.by === 'kian';
-    let outcome: PlayOutcome | null = null;
-    let received: PlayOutcome | null = null;
-    for (let attempt = 0; attempt < 3 && !isKianCatch(outcome); attempt += 1) {
-      const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
-      const client = await colyseus.connectTo(room);
-      received = null;
-      client.onMessage('playOutcome', (payload: PlayOutcome) => {
-        received = payload;
-      });
+  it('a stale post crossing from earlier in flight does not run the runner out on later exposure', async () => {
+    // Regression (task-5 fix round 2): the hit ball flies through post 2's
+    // run-out sensor early in flight — long before the runner is exposed to
+    // post 2 — and rolls away un-gathered (ALWAYS_MISS: nobody ever holds it).
+    // The runner halts safely at post 1, and only THEN sets off for post 2. A
+    // naive segment-lifetime latch would read the stale post-2 crossing the
+    // moment exposedPost() becomes 2 and wrongly run them out on a contact
+    // that predates their exposure; crossings must be scoped to the current
+    // exposure window ("ball at the exposed post WHILE exposed").
+    const post2 = FIELD.POSTS[1];
+    if (post2 === undefined) throw new Error('no post 2 in fixture');
+    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
+    const client = await colyseus.connectTo(room);
 
-      await pitchThenSwingAtTarget(room, client, FIELD.BOWLING_SQUARE, 0);
+    // Hit flown straight through post 2's sensor; runner sets off towards post 1.
+    await pitchThenSwingAtTarget(room, client, post2, 0);
+    client.send('runDecision', { go: false }); // halt at post 1
 
-      outcome = null;
-      for (let i = 0; i < 90 && outcome === null; i += 1) {
-        await room.waitForNextSimulationTick();
-        if (!room.state.ballLive) outcome = JSON.parse(room.state.lastOutcome) as PlayOutcome;
-      }
-      // The 'playOutcome' broadcast reaches the client a moment after the
-      // server-side state is already updated; give it one more tick to land.
+    let haltedAtPost1 = false;
+    for (let i = 0; i < 240 && room.state.ballLive && !haltedAtPost1; i += 1) {
       await room.waitForNextSimulationTick();
+      if (room.state.runner.atPost === 1 && !room.state.runner.running) haltedAtPost1 = true;
+    }
+    expect(haltedAtPost1).toBe(true);
+    expect(room.state.ballLive).toBe(true); // ball still rolling out; play live
 
-      if (isKianCatch(outcome)) {
-        expect(room.state.ballLive).toBe(false);
-        expect(received).toEqual(outcome);
-      }
+    // Resume towards post 2 — the moment the stale latch would fire.
+    client.send('runDecision', { go: true });
+    for (let i = 0; i < 60 && room.state.ballLive; i += 1) {
+      await room.waitForNextSimulationTick();
     }
 
-    expect(outcome).toEqual({ kind: 'caught', by: 'kian' });
+    // With the fix the runner is never run out by the stale crossing: either
+    // the play is still live (runner en route / beyond post 2) or it has since
+    // ended for a non-run-out reason (safe/rounder at rest/timeout).
+    expect(room.state.runner.out).toBe(false);
+    if (!room.state.ballLive) {
+      const outcome = JSON.parse(room.state.lastOutcome) as PlayOutcome;
+      expect(outcome.kind).not.toBe('runOut');
+    }
+  }, 20000);
+
+  it('a hit flown straight at the bowler is caught (pre-bounce)', async () => {
+    // Aimed straight back down the pitch line at the bowler with a
+    // guaranteed-catch rng: the ball flies flat into a fielder's catch radius
+    // within a few ticks, well before it can bounce, so `caught` is
+    // deterministic and this is a single attempt. WHICH fielder takes it is
+    // deliberately not pinned: a swing that lands a sub-tick late (the
+    // `waitForNextSimulationTick` fixed-timer jitter) puts contact slightly
+    // behind the plane, occasionally inside the long-reach backstop (Laurie)'s
+    // radius before Kian's — who catches is nearest-fielder jitter, not what
+    // this test protects (pre-bounce catch → caught outcome resolution).
+    const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
+    const client = await colyseus.connectTo(room);
+    let received: PlayOutcome | null = null;
+    client.onMessage('playOutcome', (payload: PlayOutcome) => {
+      received = payload;
+    });
+
+    await pitchThenSwingAtTarget(room, client, FIELD.BOWLING_SQUARE, 0);
+
+    let outcome: PlayOutcome | null = null;
+    for (let i = 0; i < 90 && outcome === null; i += 1) {
+      await room.waitForNextSimulationTick();
+      if (!room.state.ballLive) outcome = JSON.parse(room.state.lastOutcome) as PlayOutcome;
+    }
+    // The 'playOutcome' broadcast reaches the client a moment after the
+    // server-side state is already updated; give it one more tick to land.
+    await room.waitForNextSimulationTick();
+
+    expect(outcome?.kind).toBe('caught');
+    expect(FIELDING_IDS).toContain((outcome as Extract<PlayOutcome, { kind: 'caught' }>).by);
+    expect(room.state.ballLive).toBe(false);
+    expect(received).toEqual(outcome);
   }, 20000);
 });

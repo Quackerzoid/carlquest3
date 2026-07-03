@@ -17,11 +17,18 @@ export interface PhysicsModule {
   isBallAtPost(postIndex: number): boolean;
   /**
    * True iff the ball has intersected the given post's run-out sensor at ANY
-   * point since the last spawn/pitch/hit. Event-accurate (drained per substep),
-   * so it catches an intra-tick fly-through that the once-per-tick isBallAtPost
-   * pose poll would miss — see CLAUDE.md §6.4.
+   * point since the last spawn/pitch/hit/clearPostCrossings. Event-accurate
+   * (drained per substep), so it catches an intra-tick fly-through that the
+   * once-per-tick isBallAtPost pose poll would miss — see CLAUDE.md §6.4.
    */
   wasBallAtPost(postIndex: number): boolean;
+  /**
+   * Discards all crossings latched so far without disturbing future event
+   * capture. The room calls this when the runner's run-out exposure changes,
+   * scoping wasBallAtPost to the CURRENT exposure window — a crossing that
+   * predates the runner's exposure to a post must not run them out later.
+   */
+  clearPostCrossings(): void;
   /** True iff the ball has contacted the ground since the last spawn/pitch/hit. */
   hasBounced(): boolean;
   /** Upserts a fixed capsule obstacle; an existing id is repositioned, never duplicated. */
@@ -228,6 +235,10 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
         throw new RangeError(`postIndex ${postIndex} out of range 0-${postSensors.length - 1}`);
       }
       return postsCrossed.has(postIndex);
+    },
+
+    clearPostCrossings(): void {
+      postsCrossed.clear();
     },
 
     hasBounced(): boolean {
