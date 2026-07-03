@@ -196,4 +196,31 @@ describe('PhysicsModule', () => {
       );
     });
   });
+
+  describe('post sensors', () => {
+    it('detects the ball inside a post sensor volume', () => {
+      const post = CONST.FIELD.POSTS[0];
+      if (post === undefined) throw new Error('spec guarantees four posts');
+      physics.spawnBall({ x: post.x, y: CONST.FIELD.POST_HEIGHT / 2, z: post.z });
+      physics.step(DT); // sensors update on step
+      expect(physics.isBallAtPost(0)).toBe(true);
+      expect(physics.isBallAtPost(2)).toBe(false);
+    });
+
+    it('reports false once the ball has left the sensor', () => {
+      const post = CONST.FIELD.POSTS[1];
+      if (post === undefined) throw new Error('spec guarantees four posts');
+      physics.spawnBall({ x: post.x, y: CONST.FIELD.POST_HEIGHT / 2, z: post.z });
+      physics.step(DT);
+      expect(physics.isBallAtPost(1)).toBe(true);
+      physics.spawnBall({ x: post.x + 5, y: 1, z: post.z });
+      physics.step(DT);
+      expect(physics.isBallAtPost(1)).toBe(false);
+    });
+
+    it('throws RangeError for an out-of-range post index', () => {
+      expect(() => physics.isBallAtPost(4)).toThrow(RangeError);
+      expect(() => physics.isBallAtPost(-1)).toThrow(RangeError);
+    });
+  });
 });
