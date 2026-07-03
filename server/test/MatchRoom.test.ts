@@ -37,4 +37,57 @@ describe('MatchRoom', () => {
     const room = await colyseus.createRoom('match', {});
     expect(room.maxClients).toBe(2);
   });
+
+  it('pitch while idle makes the ball live with stat-derived speed', async () => {
+    const room = await colyseus.createRoom('match', {});
+    const client = await colyseus.connectTo(room);
+    client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+    await room.waitForNextSimulationTick();
+    await client.waitForNextPatch();
+    expect(client.state.ballLive).toBe(true);
+    const speed = Math.hypot(client.state.ball.vx, client.state.ball.vy, client.state.ball.vz);
+    expect(speed).toBeGreaterThan(20); // Kian pitch 8 → 26.4 m/s minus a tick of damping/gravity coupling
+    expect(speed).toBeLessThan(27);
+  });
+
+  it('rejects a second pitch while the ball is live', async () => {
+    const room = await colyseus.createRoom('match', {});
+    const client = await colyseus.connectTo(room);
+    client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+    await room.waitForNextSimulationTick();
+    const before = { ...room.state.ball };
+    client.send('pitch', { aim: { x: 1, y: 0, z: 0 }, spinInput: 1 });
+    await room.waitForNextSimulationTick();
+    // Velocity direction unchanged (second pitch ignored; ball still travelling -z)
+    expect(room.state.ball.vz).toBeLessThan(0);
+    expect(Math.sign(room.state.ball.vx)).toBe(Math.sign(before.vx));
+    expect(room.state.demoLog).toContain('rejected');
+  });
+
+  it('rejects a swing when no ball is live', async () => {
+    const room = await colyseus.createRoom('match', {});
+    const client = await colyseus.connectTo(room);
+    client.send('swing', { timing: 0, aim: { x: 0.5, y: 0.3, z: 1 }, spinInput: 0 });
+    await room.waitForNextSimulationTick();
+    expect(room.state.ballLive).toBe(false);
+    expect(room.state.demoLog).toContain('rejected');
+  });
+
+  it('full loop: pitch, wait for plane crossing, swing connects and reverses flight', async () => {
+    const room = await colyseus.createRoom('match', {});
+    const client = await colyseus.connectTo(room);
+    client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+    // Ball travels ~7.5 m at ~26.4 m/s ≈ 0.284 s ≈ 17 ticks. Poll until it nears the plane.
+    for (let i = 0; i < 60; i += 1) {
+      await room.waitForNextSimulationTick();
+      if (room.state.ball.z < 0.5) break;
+    }
+    client.send('swing', { timing: 0, aim: { x: 0.5, y: 0.3, z: 1 }, spinInput: 0 });
+    await room.waitForNextSimulationTick();
+    await room.waitForNextSimulationTick();
+    // A connected hit sends the ball back out (+z-ish per the demo aim) at hit speed.
+    expect(room.state.ball.vz).toBeGreaterThan(0);
+    const speed = Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
+    expect(speed).toBeGreaterThan(10);
+  }, 15000);
 });
