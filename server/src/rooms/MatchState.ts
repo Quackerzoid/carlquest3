@@ -23,10 +23,11 @@ export class FielderSchema extends Schema {
 }
 
 /**
- * Mirrors RunningModule's RunnerView (M4). Colyseus schema numbers cannot
- * carry `null`, so `atPost = -1` is the "between posts" sentinel for the
- * view's `atPost: number | null`; `id = ''` (with `running = false`, `out =
- * false`) is the "no runner in play" sentinel for the view being `null`.
+ * Mirrors RunningModule's RunnerView (M4/M5). Colyseus schema numbers cannot
+ * carry `null`, so `atPost = -1` is the "between posts" sentinel for the view's
+ * `atPost: number | null`. In M5 there can be several live/parked runners at
+ * once, so these are held in MatchState.runners (a MapSchema keyed by character
+ * id) rather than a single field — one entry per runner RunningModule reports.
  */
 export class RunnerSchema extends Schema {
   @type('string') id = '';
@@ -37,17 +38,47 @@ export class RunnerSchema extends Schema {
   @type('boolean') out = false;
 }
 
+/**
+ * Authoritative match state (M5). Phase, scores, innings and batting order are
+ * mirrored here from the pure RulesModule each transition; the room owns
+ * everything physical (ball, fielders, runners). Scores are in integer
+ * HALF-ROUNDER units (a rounder = 2 halves) so the schema stays integer.
+ */
 export class MatchState extends Schema {
   @type('string') phase: MatchPhase = 'LOBBY';
   @type(BallSchema) ball = new BallSchema();
   @type('boolean') ballLive = false;
-  /** Dev-visible log line for the M3+ demo (rejections, outcomes). Replaced by real events in M5+. */
-  @type('string') demoLog = '';
   @type({ map: FielderSchema }) fielders = new MapSchema<FielderSchema>();
-  @type(RunnerSchema) runner = new RunnerSchema();
+  @type({ map: RunnerSchema }) runners = new MapSchema<RunnerSchema>();
+
+  // --- Rules mirror (RulesModule.view) -------------------------------------
+  /** Half-rounders banked by side A / B (a rounder = 2 halves). */
+  @type('number') scoreHalvesA = 0;
+  @type('number') scoreHalvesB = 0;
+  /** 0-based innings slot over inningsCount*2; tiebreak plays keep the last index. */
+  @type('number') inningsIndex = 0;
+  /** Outs recorded by the batting side this innings (or this tiebreak play). */
+  @type('number') outs = 0;
+  /** Which side ('A' | 'B') is batting. */
+  @type('string') battingSide = 'A';
+  /** Character id up to bat this play ('' when none / between innings). */
+  @type('string') currentBatterId = '';
+  /** Character id bowling this play (fielding side slot 0; fixed in the M5 demo). */
+  @type('string') currentPitcherId = '';
+  /** True once the match is in sudden-death tiebreak. */
+  @type('boolean') tiebreak = false;
+  /** Winning side once GAME_OVER; '' until then. */
+  @type('string') winner = '';
+
   /**
-   * JSON-serialised PlayOutcome (M4). A structured schema replaces this once
-   * RulesModule owns scoring in M5 — logged in CLAUDE.md §6.2.
+   * JSON-serialised PlayResolution (RulesModule.resolvePlay) for the last play —
+   * cause, outs, score delta and batter. '' before the first resolved play.
    */
   @type('string') lastOutcome = '';
+  /**
+   * JSON-serialised structured rejection { message, phase, reason } for the last
+   * phase-invalid / malformed message. Mirrors the broadcast so tests can poll
+   * server state reliably (the broadcast is also sent to clients). '' initially.
+   */
+  @type('string') lastRejection = '';
 }

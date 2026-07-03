@@ -5,6 +5,7 @@ import {
   createRng,
   getCharacter,
   type FielderSetup,
+  type MatchPhase,
   type PitchInput,
   type PlayOutcome,
   type RunDecisionInput,
@@ -15,21 +16,26 @@ import { resolvePitch } from '../modules/PitchModule';
 import { resolveSwing } from '../modules/HitModule';
 import { createFieldingModule, type FieldingEvent, type FieldingModule } from '../modules/FieldingModule';
 import { createRunningModule, type RunnerView } from '../modules/RunningModule';
-import { FielderSchema, MatchState } from './MatchState';
+import { createRulesModule } from '../modules/RulesModule';
+import { FielderSchema, MatchState, RunnerSchema } from './MatchState';
 
 const { PHYSICS, GAME, FIELD } = CONST;
 
-/** Demo cast for the M3+ single-player loop; the draft replaces this in Milestone 7. */
-const DEMO_PITCHER = getCharacter('kian');
-const DEMO_BATTER = getCharacter('carl');
-
 /**
- * Demo fielding side (M4): the first 9 roster entries excluding the demo
- * batter, in table order, mapped onto FIELDING_POSITIONS in slot order —
- * Kian (first non-batter entry) lands on slot 0, the bowler. Real squad
- * selection is the M7 draft; positioning is refined in M8.
+ * M5 demo squads: BOTH sides are the full CHARACTERS table, batting order = table
+ * order (a logged demo decision — the real draft lands in M7). Because the two
+ * squads are the identical mirror roster, the fielding side (always the
+ * NON-batting side) draws the SAME nine fielders whichever side bats, so the
+ * fielding nine is fixed once here rather than recomputed per play.
+ *
+ * The fielding nine = the roster minus its nominal opener (CHARACTERS[0] = Carl),
+ * first nine, mapped onto FIELDING_POSITIONS in slot order — so Kian (the
+ * highest-pitch bowler) lands on slot 0, the bowling square. Slot-0 is the
+ * pitcher for every play in the demo. Real squad selection is the M7 draft and
+ * positioning is refined in M8.
  */
-const FIELDING_SIDE: FielderSetup[] = CHARACTERS.filter((c) => c.id !== DEMO_BATTER.id)
+const OPENER_ID = CHARACTERS[0]?.id ?? 'carl';
+const FIELDING_NINE: FielderSetup[] = CHARACTERS.filter((c) => c.id !== OPENER_ID)
   .slice(0, FIELD.FIELDING_POSITIONS.length)
   .map((character, i) => {
     const position = FIELD.FIELDING_POSITIONS[i];
@@ -37,18 +43,23 @@ const FIELDING_SIDE: FielderSetup[] = CHARACTERS.filter((c) => c.id !== DEMO_BAT
     return { character, position };
   });
 
+const PITCHER_ID = FIELDING_NINE[0]?.character.id ?? 'kian';
+
 type SwingMessage = SwingInput & { timing: number };
 
+/** Terminating cause of a play plus the runner (if any) it puts out. */
+interface Resolved {
+  cause: PlayOutcome;
+  outRunnerId: string | null;
+}
+
 /**
- * Room creation options. `rng`/`seed` are deterministic injection points used
- * by tests, but they are CLIENT-REACHABLE in the M4 demo: `joinOrCreate`
- * forwards the creating client's options object to onCreate, so these
- * compile-time types are advisory only and each field is runtime-validated in
- * onCreate (a live client CAN pass a numeric `seed`, making catch rolls
- * predictable — accepted for the demo, same trust class as the any-client
- * runDecision, pending M6/M7 role gating; see CLAUDE.md §6.2/§6.4). The
- * fallback `Date.now()` is the one permissible wall-clock read (it seeds
- * fielding randomness, not the physics simulation itself).
+ * Room creation options. `rng`/`seed` are deterministic injection points used by
+ * tests but are CLIENT-REACHABLE (joinOrCreate forwards the creating client's
+ * options to onCreate), so each field is runtime-validated in onCreate; junk
+ * falls through to the server's own wall-clock seed. The Date.now() fallback is
+ * the one permissible wall-clock read (it seeds fielding randomness, not the
+ * deterministic physics step). See CLAUDE.md §6.2/§6.4.
  */
 interface MatchRoomOptions {
   rng?: () => number;
@@ -75,61 +86,91 @@ function asRecord(message: unknown): Record<string, unknown> {
   return typeof message === 'object' && message !== null ? (message as Record<string, unknown>) : {};
 }
 
-/** Authoritative match room. M3: single-player pitch→swing demo loop. */
+function setsEqual(a: Set<number>, b: Set<number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
+}
+
+/**
+ * Authoritative match room (M5): the real phase machine. RulesModule owns phase,
+ * innings, outs and scoring; RunningModule owns the (multi) runners; FieldingModule
+ * the fielders; PhysicsModule the ball. The room drives the tick loop, validates
+ * every message against the current phase, and threads play outcomes through
+ * running.settlePlay() → rules.resolvePlay() → schema/broadcast.
+ */
 export class MatchRoom extends Room<MatchState> {
   override maxClients = 2;
 
   private physics!: PhysicsModule;
   private fielding!: FieldingModule;
   private running!: ReturnType<typeof createRunningModule>;
+  private rules!: ReturnType<typeof createRulesModule>;
   private simTime = 0;
   /** Sim-time when the live ball crossed the batting-square plane; null until it does. */
   private contactTime: number | null = null;
   private crossed = false;
   private swung = false;
+  /** True from bat contact until the play ends — gates fielding/running/outcome resolution. */
+  private contactMade = false;
   private liveSince = 0;
   private restSince: number | null = null;
   /**
-   * The exposedPost() value at the last run-out check. When exposure changes
-   * (runner sets off from a post, passes one, halts, or is exposed for the
-   * first time), the physics crossing latches are cleared so that only
-   * crossings DURING the current exposure window can trigger a run-out — a
-   * crossing that predates the exposure (e.g. the hit flew through post 2
-   * early in flight, and the runner only later set off for post 2) must not
-   * count. See checkRunOut and CLAUDE.md §6.2 (task-5 fix round 2).
+   * Posts exposed to a run-out at the last run-out check (post-running.tick). The
+   * M4 single-runner `lastExposedPost` generalised to a SET: when the exposure
+   * set changes (a runner sets off / passes / halts, or a between-tick
+   * runDecision opens a new window), the physics crossing latches are cleared so
+   * only crossings DURING the current exposure window can run a runner out. See
+   * checkRunOut and CLAUDE.md §6.2/§6.4 — both snapshot guards are load-bearing.
    */
-  private lastExposedPost: number | null = null;
+  private lastExposedPosts: Set<number> = new Set();
 
   override async onCreate(options: MatchRoomOptions = {}): Promise<void> {
     this.setState(new MatchState());
     this.physics = await createPhysicsModule();
 
-    // Join options are wire data (joinOrCreate forwards a client's options
-    // object here), so runtime-validate before use: a non-function `rng`
-    // would throw inside the simulation interval on every catch-radius entry,
-    // and a non-finite `seed` would poison createRng. Junk falls through to
-    // the server's own wall-clock seed.
+    // Mirror-roster demo squads (both sides = full table, batting order = table order).
+    const squadA = [...CHARACTERS];
+    const squadB = [...CHARACTERS];
+    this.rules = createRulesModule({ squadA, squadB });
+
+    // Join options are wire data — validate before use (a non-function rng would
+    // throw in the sim interval; a non-finite seed would poison createRng).
     const seed = isFiniteNumber(options.seed) ? options.seed : Date.now();
     const rng = typeof options.rng === 'function' ? options.rng : createRng(seed);
-    this.fielding = createFieldingModule(FIELDING_SIDE, {
+    this.fielding = createFieldingModule(FIELDING_NINE, {
       rng,
       hasBounced: () => this.physics.hasBounced(),
       applyThrow: (params) => this.physics.applyPitch(params),
       holdBallAt: (pos) => this.physics.spawnBall(pos),
+      pressure: () => this.rules.pressure(this.runnersOnPosts()),
     });
     this.running = createRunningModule();
+
+    this.state.currentPitcherId = PITCHER_ID;
+    this.syncRulesView();
     this.syncFielders();
-    this.syncRunner();
+    this.syncRunners();
 
     this.onMessage('pitch', (client, message) => this.handlePitch(client, message));
     this.onMessage('swing', (client, message) => this.handleSwing(client, message));
     this.onMessage('runDecision', (client, message) => this.handleRunDecision(client, message));
+    this.onMessage('confirmPositioning', () => this.handleConfirmPositioning());
+    this.onMessage('readyForPlay', () => this.handleReadyForPlay());
+    this.onMessage('rematch', () => this.handleRematch());
 
     this.setSimulationInterval((deltaMs) => this.tick(deltaMs), 1000 / 60);
   }
 
   override onJoin(client: Client): void {
     console.log(`client ${client.sessionId} joined`);
+    // M5 single-player stubs: the first client to join completes the lobby →
+    // draft → positioning gates immediately (bothConnected/completeDraft only
+    // fire in LOBBY/DRAFT, so a later join is a no-op). Real 2-player lobby,
+    // draft and positioning land in M6–M8.
+    this.rules.bothConnected();
+    this.rules.completeDraft();
+    this.syncRulesView();
   }
 
   override onLeave(client: Client): void {
@@ -140,13 +181,7 @@ export class MatchRoom extends Room<MatchState> {
     this.physics.dispose();
   }
 
-  /**
-   * Belt-and-braces: log and swallow any exception the framework catches from a
-   * lifecycle/message handler instead of letting it escape as a process-level
-   * crash. The isVec3/isFiniteNumber validation above should make this
-   * unreachable for pitch/swing, but this is the last line of defence for any
-   * other uncaught throw in a room callback.
-   */
+  /** Last line of defence: log and swallow any uncaught throw in a room callback. */
   override onUncaughtException(
     error: RoomException<this>,
     methodName: 'onCreate' | 'onAuth' | 'onJoin' | 'onLeave' | 'onDispose' | 'onMessage' | 'setSimulationInterval' | 'setInterval' | 'setTimeout',
@@ -154,29 +189,48 @@ export class MatchRoom extends Room<MatchState> {
     console.error(`[MatchRoom] uncaught exception in ${methodName}:`, error);
   }
 
-  /**
-   * M5 Task 2 shim: the room still drives a single runner until Task 5's
-   * multi-runner wiring lands, so it reads the first (only) runner and the first
-   * exposure from the list API that replaced M4's runner()/exposedPost().
-   */
-  private firstRunner(): RunnerView | null {
-    return this.running.runners()[0] ?? null;
+  private phase(): MatchPhase {
+    return this.rules.view().phase;
   }
 
-  private firstExposedPost(): number | null {
-    return this.running.exposures()[0]?.post ?? null;
+  /** Record and broadcast a structured rejection { message, phase, reason }. */
+  private reject(message: string, reason: string): void {
+    const payload = { message, phase: this.phase(), reason };
+    this.state.lastRejection = JSON.stringify(payload);
+    this.broadcast('rejected', payload);
   }
+
+  /** Runners currently standing on a real post (1-4) — the pressure/threshold count. */
+  private runnersOnPosts(): number {
+    return this.running.runners().filter((r) => r.atPost !== null && r.atPost >= 1).length;
+  }
+
+  /** The current play's batter-runner view (the one flagged ownHitPlay), if any. */
+  private batterRunnerView(): RunnerView | undefined {
+    return this.running.runners().find((r) => r.ownHitPlay);
+  }
+
+  private batterRunnerId(): string {
+    return this.batterRunnerView()?.id ?? this.rules.view().currentBatterId ?? '';
+  }
+
+  // ---- Message handlers ------------------------------------------------------
 
   private handlePitch(_client: Client, message: unknown): void {
-    const m = asRecord(message) as Partial<PitchInput>;
-    if (this.state.ballLive || !isVec3(m.aim) || !isFiniteNumber(m.spinInput)) {
-      this.state.demoLog = 'pitch rejected (ball live or malformed input)';
+    if (this.phase() !== 'PLAY') {
+      this.reject('pitch', `pitch only allowed in PLAY (phase ${this.phase()})`);
       return;
     }
-    const params = resolvePitch(DEMO_PITCHER.stats, { aim: m.aim, spinInput: m.spinInput });
+    const m = asRecord(message) as Partial<PitchInput>;
+    if (this.state.ballLive || !isVec3(m.aim) || !isFiniteNumber(m.spinInput)) {
+      this.reject('pitch', 'ball already live or malformed input');
+      return;
+    }
+    const pitcher = getCharacter(this.state.currentPitcherId);
+    const params = resolvePitch(pitcher.stats, { aim: m.aim, spinInput: m.spinInput });
     this.physics.applyPitch(params);
     this.state.ballLive = true;
-    this.state.demoLog = 'pitch away';
+    this.contactMade = false;
     this.contactTime = null;
     this.crossed = false;
     this.swung = false;
@@ -185,43 +239,94 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   private handleSwing(_client: Client, message: unknown): void {
+    if (this.phase() !== 'PLAY') {
+      this.reject('swing', `swing only allowed in PLAY (phase ${this.phase()})`);
+      return;
+    }
     const m = asRecord(message) as Partial<SwingMessage>;
-    // M3 decision: the client 'timing' field is accepted but ignored; the server's
-    // own sim-time is authoritative. Revisit for latency compensation in Milestone 6.
+    // The client 'timing' field is accepted but ignored; the server's own
+    // sim-time is authoritative (M3 decision, latency comp revisited in M6).
     if (!this.state.ballLive || this.swung || !isVec3(m.aim) || !isFiniteNumber(m.spinInput)) {
-      this.state.demoLog = 'swing rejected (no live pitch, already swung, or malformed input)';
+      this.reject('swing', 'no live pitch, already swung, or malformed input');
       return;
     }
     const error = this.timingErrorNow();
     if (error === null) {
-      this.state.demoLog = 'swing rejected (ball never reaches the batter)';
+      this.reject('swing', 'ball never reaches the batter');
       return;
     }
     this.swung = true;
-    const result = resolveSwing(DEMO_BATTER.stats, { aim: m.aim, spinInput: m.spinInput }, error);
+    const batterId = this.rules.view().currentBatterId;
+    if (batterId === null) {
+      this.reject('swing', 'no batter up');
+      return;
+    }
+    const batter = getCharacter(batterId);
+    const pressure = this.rules.pressure(this.runnersOnPosts());
+    const result = resolveSwing(batter.stats, { aim: m.aim, spinInput: m.spinInput }, error, 1, pressure);
     if (!result.contact) {
-      this.state.demoLog = `swing missed (timing error ${error.toFixed(3)} s)`;
+      // A legal swing that missed: not a rejection. The ball flies on and the
+      // play ends at rest/timeout with no contact (respawn, same batter re-pitches).
       return;
     }
     this.physics.applyHit(result.params);
-    this.running.startRun(DEMO_BATTER);
-    // The first exposure window (post 1) opens here, and applyHit has just
-    // cleared the crossing latches — record it now so the first checkRunOut
-    // does not treat it as an exposure CHANGE and discard a legitimate
-    // crossing from the very first tick of flight.
-    this.lastExposedPost = this.firstExposedPost();
-    this.state.demoLog = `hit! timing factor ${result.timingFactor.toFixed(2)}`;
+    this.running.startRun(batter);
+    this.contactMade = true;
+    // applyHit cleared the crossing latches; seed lastExposedPosts with the new
+    // runner's opening exposure (post 1) so the first checkRunOut does not treat
+    // it as an exposure CHANGE and discard a legitimate first-tick crossing.
+    this.lastExposedPosts = new Set(this.running.exposures().map((e) => e.post));
   }
 
   private handleRunDecision(_client: Client, message: unknown): void {
-    const m = asRecord(message) as Partial<RunDecisionInput>;
-    const runner = this.firstRunner();
-    if (!this.state.ballLive || runner === null || runner.out || typeof m.go !== 'boolean') {
-      this.state.demoLog = 'runDecision rejected (no live runner or malformed input)';
+    if (this.phase() !== 'PLAY') {
+      this.reject('runDecision', `runDecision only allowed in PLAY (phase ${this.phase()})`);
       return;
     }
+    const m = asRecord(message) as Partial<RunDecisionInput>;
+    const hasLiveRunner = this.contactMade && this.running.runners().some((r) => !r.out && !r.home);
+    if (!this.state.ballLive || !hasLiveRunner || typeof m.go !== 'boolean') {
+      this.reject('runDecision', 'no live runner or malformed input');
+      return;
+    }
+    // Shared stop/go applies to every live runner (RunningModule; user decision 2).
     this.running.setDecision(m.go);
-    this.state.demoLog = m.go ? 'runner: go' : 'runner: stop';
+  }
+
+  private handleConfirmPositioning(): void {
+    if (!this.rules.confirmPositioning()) {
+      this.reject('confirmPositioning', `only allowed in INITIAL_POSITIONING (phase ${this.phase()})`);
+      return;
+    }
+    this.syncRulesView();
+  }
+
+  private handleReadyForPlay(): void {
+    if (!this.rules.readyForPlay()) {
+      this.reject('readyForPlay', `only allowed in PRE_PLAY (phase ${this.phase()})`);
+      return;
+    }
+    this.syncRulesView();
+  }
+
+  private handleRematch(): void {
+    if (!this.rules.rematch()) {
+      this.reject('rematch', `only allowed in GAME_OVER (phase ${this.phase()})`);
+      return;
+    }
+    // Fresh match: clear runners (innings/rematch is the only running.reset seam),
+    // fielders back to slots, ball parked, all latches cleared.
+    this.running.reset();
+    this.fielding.reset();
+    this.physics.spawnBall();
+    this.state.ballLive = false;
+    this.contactMade = false;
+    this.restSince = null;
+    this.lastExposedPosts = new Set();
+    this.state.lastOutcome = '';
+    this.syncRulesView();
+    this.syncRunners();
+    this.syncFielders();
   }
 
   /** Signed swing-timing error: positive = late, negative = early; null if no contact possible. */
@@ -234,8 +339,10 @@ export class MatchRoom extends Room<MatchState> {
     return -timeToPlane; // early by the projected time remaining
   }
 
+  // ---- Simulation tick -------------------------------------------------------
+
   private tick(deltaMs: number): void {
-    // Clamp to avoid a spiral-of-death catch-up burst after an event-loop stall (§6.4 M2 item).
+    // Clamp to avoid a spiral-of-death catch-up burst after an event-loop stall.
     const dt = Math.min(deltaMs / 1000, PHYSICS.SIM_MAX_CATCHUP);
     this.simTime += dt;
     if (!this.state.ballLive) return;
@@ -250,64 +357,41 @@ export class MatchRoom extends Room<MatchState> {
       this.contactTime = this.simTime;
     }
 
-    this.state.ball.x = state.position.x;
-    this.state.ball.y = state.position.y;
-    this.state.ball.z = state.position.z;
-    this.state.ball.vx = state.velocity.x;
-    this.state.ball.vy = state.velocity.y;
-    this.state.ball.vz = state.velocity.z;
-    this.state.ball.wx = state.angularVelocity.x;
-    this.state.ball.wy = state.angularVelocity.y;
-    this.state.ball.wz = state.angularVelocity.z;
+    this.syncBall();
 
-    // Fielding/running/outcome resolution only engage once a hit has started
-    // a run — before that (a pitch still in flight, or a swing that missed),
-    // there is nothing yet to field: without this gate, a fielder standing at
-    // the release point (the bowler) could roll a "catch" on their own
-    // still-live pitch before the batter ever swings.
-    if (this.firstRunner() !== null) {
-      // Fielding sees the runner's pre-tick target (this tick's chase/cover
-      // decision); the run-out check below re-reads the exposure AFTER
-      // running.tick, per plan order.
-      const preExposed = this.firstExposedPost();
-      // Snapshot the exposed post's crossing latch BEFORE fielding runs: a
-      // same-tick gather parks the ball (holdBallAt → placeBall), which clears
-      // the crossing latches — without this snapshot, a ball that crossed the
-      // exposed post's sensor and was gathered in the same tick would erase
-      // its own run-out evidence (M4 final-review minor 3).
-      //
-      // The snapshot is honoured ONLY while exposure is ALSO unchanged since
-      // the LAST check (preExposed === lastExposedPost, compared here before
-      // checkRunOut overwrites it): exposure can change BETWEEN ticks via a
-      // runDecision message — e.g. go:true from a halt flips exposure
-      // null → 2 outside any tick — and on the first tick of that new window
-      // the latch may hold a crossing that PREDATES the window (the ball
-      // rolled through the post while the runner sat halted; nothing clears
-      // latches while exposure is null). Reading it before checkRunOut's
-      // transition-clear would resurrect exactly the stale-crossing false
-      // run-out that clear exists to prevent (final-review round 2).
-      const crossedExposedPost =
-        preExposed !== null &&
-        preExposed === this.lastExposedPost &&
-        this.physics.wasBallAtPost(preExposed - 1);
-      const fieldingEvent = this.fielding.tick(dt, state, this.state.ballLive, preExposed);
+    if (this.contactMade) {
+      // Pre-fielding snapshot of the exposed posts' crossing latches: a same-tick
+      // gather (holdBallAt → placeBall) clears the latches, so read them BEFORE
+      // fielding. Honour only posts continuously exposed since the last check
+      // (in BOTH pre-tick exposures AND lastExposedPosts) — a between-tick
+      // runDecision opening a new window over a stale latch must not count.
+      const preExposures = this.running.exposures();
+      const preExposedPosts = new Set(preExposures.map((e) => e.post));
+      const crossedSnapshot = new Map<number, boolean>();
+      for (const post of preExposedPosts) {
+        if (this.lastExposedPosts.has(post)) {
+          crossedSnapshot.set(post, this.physics.wasBallAtPost(post - 1));
+        }
+      }
+
+      const fieldingEvent = this.fielding.tick(dt, state, this.state.ballLive, this.primaryExposure(preExposures));
       this.running.tick(dt);
 
-      const atRestOrTimedOut = this.updateRestTracking(state);
-      const outcome = this.resolveOutcome(fieldingEvent, atRestOrTimedOut, preExposed, crossedExposedPost);
-      if (outcome !== null) {
-        this.endPlay(outcome);
+      const atRest = this.updateRestTracking(state);
+      const resolved = this.resolveOutcome(fieldingEvent, atRest, crossedSnapshot);
+      if (resolved !== null) {
+        this.endPlay(resolved);
+      } else {
+        this.syncRunners();
+        this.syncFielders();
       }
     } else if (this.updateRestTracking(state)) {
-      // M3 behaviour preserved: nobody swung (or swung and missed) — quietly
-      // respawn with no scoring outcome to report.
+      // No contact this play (un-hit pitch or a missed swing): quietly respawn
+      // and stay in PLAY so the batter can re-pitch — no play resolution.
       this.state.ballLive = false;
-      this.state.demoLog = 'play over (rest/timeout) — press P to pitch';
       this.physics.spawnBall();
+      this.restSince = null;
     }
-
-    this.syncFielders();
-    this.syncRunner();
   }
 
   /** Updates the rest/timeout latch from the current ball state; returns whether the play should end for that reason. */
@@ -323,93 +407,153 @@ export class MatchRoom extends Room<MatchState> {
     return timedOut || atRest;
   }
 
-  /**
-   * Run-out per plan: the ball has touched the exposed post's run-out sensor at
-   * any point this play segment (event-accurate via physics.wasBallAtPost —
-   * latched per substep, so a fast fly-through between ticks is never lost, per
-   * CLAUDE.md §6.4) OR the ball's current holder is standing within range of it.
-   */
-  private checkRunOut(preExposed: number | null, crossedPreFielding: boolean): number | null {
-    const exposed = this.firstExposedPost();
-    if (exposed !== this.lastExposedPost) {
-      // Exposure changed since the last check (runner set off from a post,
-      // passed one, or halted): crossings latched before this exposure began
-      // must not count — the rule is "ball at the exposed post WHILE exposed",
-      // not "ball has ever touched that post this play segment".
-      this.physics.clearPostCrossings();
-      this.lastExposedPost = exposed;
-    }
-    if (exposed === null) return null;
-    // Pre-fielding snapshot: the ball crossed this post's sensor earlier in
-    // THIS tick and may since have been gathered (holdBallAt → placeBall
-    // clears the latches). Honoured only while the exposure is unchanged both
-    // since the LAST check (guarded at the snapshot site against a
-    // between-tick runDecision opening a new exposure window over a stale
-    // latch) and across THIS tick — if the runner reached the post in the
-    // same tick, the photo-finish still resolves in the runner's favour
-    // (CLAUDE.md §6.4).
-    if (exposed === preExposed && crossedPreFielding) return exposed;
-    const postIndex = exposed - 1; // physics posts are 0-based; posts 1-4 in the running/schema domain
-    if (this.physics.wasBallAtPost(postIndex)) return exposed;
-    // The event latch fires on sensor ENTRY; a ball already resting inside the
-    // sensor when this exposure window opened re-fires no event (and the clear
-    // above just discarded its entry), so also poll the current intersection.
-    if (this.physics.isBallAtPost(postIndex)) return exposed;
-    const holderId = this.fielding.holderId();
-    if (holderId === null) return null;
-    const holder = this.fielding.getFielders().find((f) => f.id === holderId);
-    if (holder === undefined) return null;
-    const post = FIELD.POSTS[postIndex];
-    if (post === undefined) return null;
-    const distance = Math.hypot(holder.x - post.x, holder.z - post.z);
-    return distance <= FIELD.POST_SENSOR_RADIUS ? exposed : null;
+  /** Feed the fielder AI ONE threatened post: the most advanced exposed runner's target (deterministic). */
+  private primaryExposure(exposures: { runnerId: string; post: number }[]): number | null {
+    let best: number | null = null;
+    for (const e of exposures) if (best === null || e.post > best) best = e.post;
+    return best;
   }
 
-  /** First-outcome-wins resolution, in plan priority order: caught, runOut, rounder, safe. */
-  private resolveOutcome(
-    fieldingEvent: FieldingEvent | null,
-    atRestOrTimedOut: boolean,
-    preExposed: number | null,
-    crossedExposedPost: boolean,
-  ): PlayOutcome | null {
-    if (fieldingEvent !== null && fieldingEvent.kind === 'caught') {
-      return { kind: 'caught', by: fieldingEvent.by };
+  /**
+   * Per-runner run-out. exposures() gives every mid-segment runner's target post.
+   * For each exposed post the ball is "at" it when: a pre-fielding snapshot caught
+   * a same-tick crossing on a continuously-exposed post; OR the sensor was
+   * touched this segment (wasBallAtPost, event-accurate per substep); OR the ball
+   * currently intersects it; OR the holder stands within range of it. First hit
+   * wins. When the exposure SET changes, latches are cleared so stale crossings
+   * (from before the window) never count (CLAUDE.md §6.4).
+   */
+  private checkRunOut(crossedSnapshot: Map<number, boolean>): { runnerId: string; post: number } | null {
+    const exposures = this.running.exposures();
+    const currentPosts = new Set(exposures.map((e) => e.post));
+    if (!setsEqual(currentPosts, this.lastExposedPosts)) {
+      this.physics.clearPostCrossings();
+      this.lastExposedPosts = currentPosts;
     }
-    const runner = this.firstRunner();
-    const runOutPost = this.checkRunOut(preExposed, crossedExposedPost);
-    if (runOutPost !== null) {
-      // M4/M5: a single-runner room — the runner put out is always the sole
-      // live runner. Multi-runner attribution lands in Task 5.
-      return { kind: 'runOut', atPost: runOutPost, runnerId: runner?.id ?? '' };
-    }
-    if (runner !== null) {
-      if (runner.home) return { kind: 'rounder' };
-      if (atRestOrTimedOut) {
-        // Mid-segment at play end = safe at the previous post (M4 simplification, logged in CLAUDE.md §6.2).
-        // A live, non-home runner always has EITHER targetPost (mid-segment) OR
-        // atPost (halted) non-null — RunningModule never leaves both null while
-        // running (startRun sets targetPost; arrival sets one or the other), and
-        // the only null/null state is `out`, which is resolved as a run-out
-        // above. So the final `: 0` branch is unreachable; it is a defensive
-        // default that keeps atPost a valid number rather than undefined/NaN if
-        // that invariant is ever changed.
-        const atPost = runner.atPost ?? (runner.targetPost !== null ? runner.targetPost - 1 : 0);
-        return { kind: 'safe', atPost, runnerId: runner.id };
-      }
+    for (const { runnerId, post } of exposures) {
+      const idx = post - 1; // physics posts are 0-based; posts 1-4 in the running/schema domain
+      if (crossedSnapshot.get(post) === true) return { runnerId, post };
+      if (this.physics.wasBallAtPost(idx)) return { runnerId, post };
+      if (this.physics.isBallAtPost(idx)) return { runnerId, post };
+      if (this.holderNearPost(post)) return { runnerId, post };
     }
     return null;
   }
 
-  private endPlay(outcome: PlayOutcome): void {
-    this.state.lastOutcome = JSON.stringify(outcome);
-    this.broadcast('playOutcome', outcome);
+  /** The current ball holder is standing within a post's run-out sensor radius. */
+  private holderNearPost(post: number): boolean {
+    const holderId = this.fielding.holderId();
+    if (holderId === null) return false;
+    const holder = this.fielding.getFielders().find((f) => f.id === holderId);
+    if (holder === undefined) return false;
+    const p = FIELD.POSTS[post - 1];
+    if (p === undefined) return false;
+    return Math.hypot(holder.x - p.x, holder.z - p.z) <= FIELD.POST_SENSOR_RADIUS;
+  }
+
+  /** First-outcome-wins resolution, in priority order: caught, runOut, then rest/timeout settle. */
+  private resolveOutcome(
+    fieldingEvent: FieldingEvent | null,
+    atRest: boolean,
+    crossedSnapshot: Map<number, boolean>,
+  ): Resolved | null {
+    if (fieldingEvent !== null && fieldingEvent.kind === 'caught') {
+      // The batter-runner is caught out; the fielder is cause.by.
+      return { cause: { kind: 'caught', by: fieldingEvent.by }, outRunnerId: this.batterRunnerId() };
+    }
+    const runOut = this.checkRunOut(crossedSnapshot);
+    if (runOut !== null) {
+      return {
+        cause: { kind: 'runOut', atPost: runOut.post, runnerId: runOut.runnerId },
+        outRunnerId: runOut.runnerId,
+      };
+    }
+    if (atRest) {
+      return { cause: this.settleCause(), outRunnerId: null };
+    }
+    return null;
+  }
+
+  /** The reported PlayOutcome for a play that ends at rest/timeout (from the batter-runner's position). */
+  private settleCause(): PlayOutcome {
+    const b = this.batterRunnerView();
+    if (b?.home === true) return { kind: 'rounder' };
+    const atPost = b === undefined ? 0 : (b.atPost ?? (b.targetPost !== null ? b.targetPost - 1 : 0));
+    const runnerId = b?.id ?? this.rules.view().currentBatterId ?? '';
+    return { kind: 'safe', atPost, runnerId };
+  }
+
+  /**
+   * Settle the play: mark the out runner (caught batter / run-out) so settlePlay
+   * removes them, gather per-runner facts, then let RulesModule resolve scoring,
+   * outs, batter rotation and phase. Broadcast/sync the resolution. running.reset()
+   * is called ONLY when the innings context changes (innings switch, tiebreak, or
+   * game over) — otherwise parked survivors persist into the next play.
+   */
+  private endPlay(resolved: Resolved): void {
+    if (resolved.outRunnerId !== null && resolved.outRunnerId !== '') {
+      this.running.markOut(resolved.outRunnerId);
+    }
+    const facts = this.running.settlePlay();
+    const prevInnings = this.rules.view().inningsIndex;
+    const resolution = this.rules.resolvePlay(resolved.cause, facts);
+
     this.state.ballLive = false;
-    this.state.demoLog = `play over: ${outcome.kind}`;
+    this.contactMade = false;
     this.physics.spawnBall();
     this.fielding.reset();
-    this.running.reset();
     this.restSince = null;
-    this.lastExposedPost = null;
+    this.lastExposedPosts = new Set();
+
+    if (resolution === null) {
+      // Defensive: resolvePlay only returns null out of PLAY / with no batter,
+      // neither of which should reach here. Log, clear runners, and recover.
+      console.error('[MatchRoom] resolvePlay returned null unexpectedly');
+      this.running.reset();
+      this.syncRulesView();
+      this.syncRunners();
+      this.syncFielders();
+      return;
+    }
+
+    this.state.lastOutcome = JSON.stringify(resolution);
+    this.broadcast('playOutcome', resolution);
+
+    const v = this.rules.view();
+    if (v.phase === 'GAME_OVER' || v.inningsIndex !== prevInnings || v.tiebreak) {
+      this.running.reset(); // innings switch / tiebreak / game over: no parked carry-over
+    }
+    this.syncRulesView();
+    this.syncRunners();
+    this.syncFielders();
+  }
+
+  // ---- Schema sync -----------------------------------------------------------
+
+  private syncBall(): void {
+    const state = this.physics.getBallState();
+    this.state.ball.x = state.position.x;
+    this.state.ball.y = state.position.y;
+    this.state.ball.z = state.position.z;
+    this.state.ball.vx = state.velocity.x;
+    this.state.ball.vy = state.velocity.y;
+    this.state.ball.vz = state.velocity.z;
+    this.state.ball.wx = state.angularVelocity.x;
+    this.state.ball.wy = state.angularVelocity.y;
+    this.state.ball.wz = state.angularVelocity.z;
+  }
+
+  private syncRulesView(): void {
+    const v = this.rules.view();
+    this.state.phase = v.phase;
+    this.state.scoreHalvesA = v.scoreHalves.A;
+    this.state.scoreHalvesB = v.scoreHalves.B;
+    this.state.inningsIndex = v.inningsIndex;
+    this.state.outs = v.outs;
+    this.state.battingSide = v.battingSide;
+    this.state.currentBatterId = v.currentBatterId ?? '';
+    this.state.tiebreak = v.tiebreak;
+    this.state.winner = v.winner ?? '';
   }
 
   private syncFielders(): void {
@@ -427,22 +571,24 @@ export class MatchRoom extends Room<MatchState> {
     }
   }
 
-  private syncRunner(): void {
-    const view = this.firstRunner();
-    if (view === null) {
-      this.state.runner.id = '';
-      this.state.runner.x = 0;
-      this.state.runner.z = 0;
-      this.state.runner.atPost = -1;
-      this.state.runner.running = false;
-      this.state.runner.out = false;
-      return;
+  private syncRunners(): void {
+    const seen = new Set<string>();
+    for (const view of this.running.runners()) {
+      seen.add(view.id);
+      let schema = this.state.runners.get(view.id);
+      if (schema === undefined) {
+        schema = new RunnerSchema();
+        schema.id = view.id;
+        this.state.runners.set(view.id, schema);
+      }
+      schema.x = view.x;
+      schema.z = view.z;
+      schema.atPost = view.atPost ?? -1;
+      schema.running = view.targetPost !== null;
+      schema.out = view.out;
     }
-    this.state.runner.id = view.id;
-    this.state.runner.x = view.x;
-    this.state.runner.z = view.z;
-    this.state.runner.atPost = view.atPost ?? -1;
-    this.state.runner.running = view.targetPost !== null;
-    this.state.runner.out = view.out;
+    for (const key of [...this.state.runners.keys()]) {
+      if (!seen.has(key)) this.state.runners.delete(key);
+    }
   }
 }
