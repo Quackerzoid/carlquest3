@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CONST,
+  approachPenalty,
   catchRadius,
   clamp01,
   exitVelocity,
@@ -97,6 +98,14 @@ describe('formulas (spec §5, exact shapes)', () => {
     expect(pressureMult(10)).toBeCloseTo(1, 10);
     expect(pressureMult(0)).toBeCloseTo(0.85, 10);
     expect(pressureMult(8)).toBeCloseTo(0.97, 10);
+  });
+
+  it('approachPenalty = APPROACH_W · clamp01(speed / APPROACH_REF_SPEED)', () => {
+    expect(approachPenalty(0)).toBe(0);
+    expect(approachPenalty(15)).toBe(0.175);
+    expect(approachPenalty(30)).toBe(0.35);
+    expect(approachPenalty(60)).toBe(0.35); // clamped at the reference speed
+    expect(approachPenalty(-5)).toBe(0); // negative speeds clamp to 0
   });
 
   it('formulas are pure (repeat calls identical)', () => {

@@ -56,6 +56,11 @@ export function hitSpin(spin: number, hitCurveMult: number): number {
   return G.SPIN_MAX_RADS * s01(spin) * hitCurveMult;
 }
 
+/** pCatch approach penalty: faster incoming balls are harder to catch (spec §5 names the term; M4 defines it). */
+export function approachPenalty(ballSpeed: number): number {
+  return G.APPROACH_W * clamp01(ballSpeed / G.APPROACH_REF_SPEED);
+}
+
 /** Catch success probability before ability overrides (spec §5). */
 export function pCatch(instinct: number, reflex: number, approachPenalty: number): number {
   return clamp01(G.BASE_CATCH + G.INSTINCT_W * s01(instinct) + G.REFLEX_W * s01(reflex) - approachPenalty);

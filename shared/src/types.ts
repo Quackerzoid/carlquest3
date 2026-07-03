@@ -84,3 +84,25 @@ export interface SwingInput {
   aim: Vec3;
   spinInput: number;
 }
+
+/**
+ * Payload of the runDecision message — player stop/go runner control.
+ * A user-approved deviation from spec §7 (M4 design decision): go = run on /
+ * resume; stop = halt at the next post reached (posts are the only safe stops).
+ */
+export interface RunDecisionInput {
+  go: boolean;
+}
+
+/** How a play resolved — the M4 subset of the spec §7 playOutcome; M5 adds half-rounder/no-ball. */
+export type PlayOutcome =
+  | { kind: 'caught'; by: string }
+  | { kind: 'runOut'; atPost: number } // 1–4
+  | { kind: 'safe'; atPost: number } // 0–4 (0 = batting square)
+  | { kind: 'rounder' };
+
+/** A fielder and their starting slot — FieldingModule construction input (M4). */
+export interface FielderSetup {
+  character: Character;
+  position: { x: number; z: number };
+}

@@ -22,11 +22,14 @@ const PHYSICS = {
   SIM_MAX_CATCHUP: 0.25,
 } as const;
 
+/** Bowler stands here, facing the batter; doubles as fielding slot 0 so the two cannot drift. */
+const BOWLING_SQUARE = { x: 0, z: 7.5 };
+
 const FIELD = {
   /** Batter stands here; world origin. */
   BATTING_SQUARE: { x: 0, z: 0 },
   /** Bowler stands here, facing the batter. */
-  BOWLING_SQUARE: { x: 0, z: 7.5 },
+  BOWLING_SQUARE,
   /** Posts 1–4, run anticlockwise. Placeholder school-rounders layout. */
   POSTS: [
     { x: 11, z: 4 },
@@ -42,6 +45,22 @@ const FIELD = {
   BOWLING_SQUARE_SIZE: 2.5,
   /** Run-out sensor cylinder radius around each post (M2 design decision). */
   POST_SENSOR_RADIUS: 0.5,
+  /**
+   * Default nine fielding slots (M4 placeholder; real positioning lands in M8).
+   * Slot 0 is the bowler (must equal BOWLING_SQUARE), slot 1 the backstop,
+   * slots 2–5 mind posts 1–4, and slots 6–8 patrol the deep field.
+   */
+  FIELDING_POSITIONS: [
+    BOWLING_SQUARE,
+    { x: 0, z: -3 },
+    { x: 12, z: 3 },
+    { x: 10, z: 16 },
+    { x: -4, z: 18 },
+    { x: -9.5, z: 5 },
+    { x: 16, z: 24 },
+    { x: 3, z: 28 },
+    { x: -12, z: 24 },
+  ],
 } as const;
 
 const GAME = {
@@ -73,6 +92,18 @@ const GAME = {
   PLAY_TIMEOUT_S: 6,
   BALL_REST_SPEED: 0.1,
   BALL_REST_TIME_S: 1,
+  /** pCatch approach-penalty weight — fast-arriving balls are harder to catch (M4 design decision). */
+  APPROACH_W: 0.35,
+  /** Ball speed in m/s at which the approach penalty saturates (M4 design decision). */
+  APPROACH_REF_SPEED: 30,
+  /** Gather-to-throw release delay in seconds; QUICK_DRAW halves it in M9 (M4 design decision). */
+  THROW_RELEASE_DELAY_S: 0.5,
+  /** Stamina drained per second of fielder sprinting (M4 design decision). */
+  SPRINT_STAMINA_COST_PER_S: 0.15,
+  /** Stamina drained per throw (M4 design decision). */
+  THROW_STAMINA_COST: 0.5,
+  /** Balls above this height in metres are over everyone's head — no catch attempt (M4 design decision). */
+  CATCH_HEIGHT_MAX: 2.5,
 } as const;
 
 function deepFreeze<T extends object>(obj: T): T {

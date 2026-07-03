@@ -143,6 +143,30 @@ describe('constants', () => {
       expect(CONST.GAME.BALL_REST_SPEED).toBe(0.1);
       expect(CONST.GAME.BALL_REST_TIME_S).toBe(1);
     });
+
+    it('pins the pCatch approach-penalty weight to 0.35', () => {
+      expect(CONST.GAME.APPROACH_W).toBe(0.35);
+    });
+
+    it('pins the approach-penalty reference speed to 30 m/s', () => {
+      expect(CONST.GAME.APPROACH_REF_SPEED).toBe(30);
+    });
+
+    it('pins the gather-to-throw release delay to 0.5 s', () => {
+      expect(CONST.GAME.THROW_RELEASE_DELAY_S).toBe(0.5);
+    });
+
+    it('pins the sprint stamina cost to 0.15 per second', () => {
+      expect(CONST.GAME.SPRINT_STAMINA_COST_PER_S).toBe(0.15);
+    });
+
+    it('pins the throw stamina cost to 0.5', () => {
+      expect(CONST.GAME.THROW_STAMINA_COST).toBe(0.5);
+    });
+
+    it('pins the maximum catchable ball height to 2.5 m', () => {
+      expect(CONST.GAME.CATCH_HEIGHT_MAX).toBe(2.5);
+    });
   });
 
   describe('FIELD — placeholder geometry (spec §8b)', () => {
@@ -173,6 +197,21 @@ describe('constants', () => {
     it('pins the post run-out sensor radius to 0.5 m', () => {
       expect(CONST.FIELD.POST_SENSOR_RADIUS).toBe(0.5);
     });
+
+    it('defines exactly nine fielding positions', () => {
+      expect(CONST.FIELD.FIELDING_POSITIONS).toHaveLength(9);
+    });
+
+    it('places fielding slot 0 (the bowler) on the bowling square', () => {
+      expect(CONST.FIELD.FIELDING_POSITIONS[0]).toEqual(CONST.FIELD.BOWLING_SQUARE);
+    });
+
+    it('keeps every fielding position finite', () => {
+      for (const pos of CONST.FIELD.FIELDING_POSITIONS) {
+        expect(Number.isFinite(pos.x)).toBe(true);
+        expect(Number.isFinite(pos.z)).toBe(true);
+      }
+    });
   });
 
   describe('MATCH_PHASES', () => {
@@ -196,6 +235,9 @@ describe('constants', () => {
       expect(Object.isFrozen(CONST.PHYSICS)).toBe(true);
       expect(Object.isFrozen(CONST.FIELD.POSTS)).toBe(true);
       expect(Object.isFrozen(CONST.FIELD.POSTS[0])).toBe(true);
+      expect(Object.isFrozen(CONST.FIELD.FIELDING_POSITIONS)).toBe(true);
+      expect(Object.isFrozen(CONST.FIELD.FIELDING_POSITIONS[0])).toBe(true);
+      expect(Object.isFrozen(CONST.GAME)).toBe(true);
     });
   });
 });
