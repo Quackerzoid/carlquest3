@@ -32,6 +32,14 @@ export function attachInput(net: Net, onLocalAction: (text: string) => void): In
         event.preventDefault();
         net.sendSwing({ timing: 0, aim: HIT_AIM, spinInput: 0 });
         break;
+      case 'KeyR':
+        net.sendRunDecision({ go: true });
+        onLocalAction('run: go');
+        break;
+      case 'KeyT':
+        net.sendRunDecision({ go: false });
+        onLocalAction('run: stop');
+        break;
       default:
     }
   });

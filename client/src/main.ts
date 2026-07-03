@@ -1,6 +1,6 @@
 import { createScene } from './SceneModule';
 import { connect } from './NetModule';
-import { createBallView } from './RenderModule';
+import { createBallView, createFieldersView, createRunnerView } from './RenderModule';
 import { attachInput } from './InputModule';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#app');
@@ -9,9 +9,11 @@ if (!canvas || !status) throw new Error('Missing #app canvas or #status line');
 
 const { scene, start } = createScene(canvas);
 const ball = createBallView(scene);
+const fielders = createFieldersView(scene);
+const runner = createRunnerView(scene);
 start();
 
-const HELP = 'A/S/D spin · P pitch · Space swing';
+const HELP = 'A/S/D spin · P pitch · Space swing · R run · T stop';
 
 connect()
   .then((net) => {
@@ -19,9 +21,15 @@ connect()
     attachInput(net, (text) => {
       status.textContent = `${text} — ${HELP}`;
     });
+    net.onPlayOutcome((outcome) => {
+      status.textContent = `outcome: ${JSON.stringify(outcome)} — ${HELP}`;
+    });
     net.room.onStateChange((state) => {
       ball.update(state.ball.x, state.ball.y, state.ball.z, state.ballLive);
+      fielders.update(state.fielders.values());
+      runner.update(state.runner);
       if (state.demoLog) status.textContent = `${state.demoLog} — ${HELP}`;
+      else if (state.lastOutcome) status.textContent = `${state.lastOutcome} — ${HELP}`;
     });
   })
   .catch((error: unknown) => {
