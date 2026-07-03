@@ -65,17 +65,23 @@ This section is the anti-hallucination ledger. It is the **only** trusted record
 
 ### 6.1 Current State (overwrite to reflect reality)
 
-- **Milestone:** 0 — not started.
-- **Last green commit:** none.
-- **Modules implemented:** none.
-- **Test status:** no test suite yet.
-- **Open worktrees/branches:** none.
+- **Milestone:** 1 (scaffold) — complete, pending final branch review + merge.
+- **Last green commit:** c1649c5 (+ log/cleanup commits after) on branch `worktree-m1-scaffold`.
+- **Modules implemented:** `/shared` (types.ts: MatchPhase/MATCH_PHASES/Vec3; constants.ts: CONST.PHYSICS/FIELD/GAME, deep-frozen); `/server` (Colyseus bootstrap, empty `MatchRoom` maxClients 2, `MatchState` schema phase='LOBBY', shared app.config.ts, port 2567); `/client` (Vite + Three.js SceneModule: ground, batting/bowling squares, 4 posts, lights, camera — all geometry from CONST.FIELD). No game logic yet anywhere.
+- **Test status:** 38/38 passing (36 shared constants/phases, 2 server room), `npm run check` green (typecheck ×3 workspaces + ESLint + Vitest).
+- **Open worktrees/branches:** `.claude/worktrees/m1-scaffold` on `worktree-m1-scaffold` (this milestone; to be merged to main and tagged `m1-scaffold`).
 
 ### 6.2 Decisions Record (append-only)
 
 | Date | Decision | Reason |
 |------|----------|--------|
-| — | — | — |
+| 2026-07-03 | npm workspaces (not pnpm) | Matches `npm run …` commands mandated in §3; stated in README. |
+| 2026-07-03 | Field geometry (post/square coordinates in CONST.FIELD) is a placeholder school-rounders layout | Spec gives no pitch dimensions; structural tests only pin 4 posts + positive dimensions; tune in playtest. |
+| 2026-07-03 | `BENCH_STAMINA_REGEN = 1` per play | Spec §4 names the constant but gives no value; revisit when fatigue lands (Milestone 4). |
+| 2026-07-03 | typescript-eslint v8 (plan said v7) | v7 requires ESLint 8; repo uses ESLint 9. |
+| 2026-07-03 | Server tsconfig keeps base Bundler/ESNext resolution (plan said NodeNext override) | NodeNext broke extensionless source-level `@carlquest/shared` imports and `@colyseus/tools` CJS interop under tsx. |
+| 2026-07-03 | `server/src/app.config.ts` exports a typed plain `ConfigOptions` object rather than calling `@colyseus/tools` `config()` | The default-import `config()` call crashes under real Node ESM (CJS interop); invariant kept: one config shared by index.ts and @colyseus/testing. |
+| 2026-07-03 | `server/vitest.config.ts` pins `pool: 'threads'` | Vitest 2.1.9 forks pool crashes on Windows IPC. |
 
 ### 6.3 Changelog (append-only, newest first)
 
@@ -88,8 +94,14 @@ Entry format:
 - Notes/deviations: anything the spec didn't cover, or "none"
 ```
 
-_(no entries yet)_
+### 2026-07-03 — [Milestone 1] Monorepo scaffold (Tasks 1–5)
+- Changed: root workspace (package.json, tsconfig.base.json, eslint.config.js, .prettierrc.json, vitest.workspace.ts, README.md, .gitignore); shared/ (package.json, tsconfig.json, src/{index,types,constants}.ts, test/constants.test.ts); server/ (package.json, tsconfig.json, vitest.config.ts, src/{index,app.config}.ts, src/rooms/{MatchRoom,MatchState}.ts, test/MatchRoom.test.ts); client/ (package.json, tsconfig.json, vite.config.ts, index.html, src/{main,SceneModule}.ts); .claude/launch.json; plan doc amendments.
+- Verified: `npm run check` → typecheck clean ×3 workspaces, ESLint clean, 38/38 Vitest tests passed. `npm run dev` → Vite HTTP 200 on 5173 AND Colyseus listening on 2567 concurrently. Visual acceptance: headless-Edge screenshot of http://localhost:5173 shows ground, batting/bowling squares, 4 posts, sky. Server boot test joins a client and reads phase 'LOBBY' from synced schema.
+- Notes/deviations: see Decisions Record 2026-07-03 rows (typescript-eslint v8, Bundler resolution kept, plain ConfigOptions export, vitest threads pool). Node.js 24 LTS was installed on this machine via winget (was absent). Executed via subagent-driven development; each task passed an independent spec+quality review.
 
 ### 6.4 Known Issues (keep current — remove only when fixed and verified)
 
-_(none recorded)_
+- Server test stdout is not pristine: `@colyseus/tools` prints an ".env file not found" info line, and MatchRoom onJoin/onLeave console.logs (plan-mandated) appear in Vitest output. Cosmetic; revisit when MatchRoom gains real logic.
+- `npm audit` reports 5 vulnerabilities (3 moderate, 1 high, 1 critical) in transitive dev/runtime deps as of 2026-07-03; not triaged yet.
+- `server/package.json` `build` script aliases typecheck (no emit config yet); real build wiring deferred until a milestone needs emitted server JS.
+- Client WebGL renders very slowly in the sandboxed preview browser (software rasteriser) — verification used headless Edge instead; real browsers are fine.
