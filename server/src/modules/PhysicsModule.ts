@@ -15,6 +15,12 @@ export interface PhysicsModule {
   getBallState(): BallState;
   /** True while the ball intersects the run-out sensor of the given post (0-3). */
   isBallAtPost(postIndex: number): boolean;
+  /** True iff the ball has contacted the ground since the last spawn/pitch/hit. */
+  hasBounced(): boolean;
+  /** Upserts a fixed capsule obstacle; an existing id is repositioned, never duplicated. */
+  setBlocker(id: string, position: Vec3, halfHeight: number, radius: number): void;
+  /** Removes the blocker with this id; silent no-op for unknown ids. */
+  clearBlocker(id: string): void;
   dispose(): void;
 }
 
@@ -29,7 +35,7 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
   const groundBody = world.createRigidBody(
     RAPIER.RigidBodyDesc.fixed().setTranslation(0, -PHYSICS.GROUND_THICKNESS, 0),
   );
-  world.createCollider(
+  const groundCollider = world.createCollider(
     RAPIER.ColliderDesc.cuboid(FIELD.GROUND_HALF_EXTENT, PHYSICS.GROUND_THICKNESS, FIELD.GROUND_HALF_EXTENT)
       .setFriction(PHYSICS.GROUND_FRICTION),
     groundBody,
@@ -50,6 +56,10 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
       // ground's un-set (zero) restitution and halve the effective bounce, so
       // pin the ball's coefficient as the one that governs every contact.
       .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Max)
+      // Emit contact started/stopped events for bounce tracking. Purely
+      // observational — nothing in the solver changes, so trajectories are
+      // identical with or without it (pinned by the determinism test).
+      .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS)
       .setMass(PHYSICS.BALL_MASS),
     ballBody,
   );
@@ -69,6 +79,17 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
     );
   });
 
+  // Blockers: fixed capsule obstacles keyed by caller id (spec §6, The Whale —
+  // capability lands in M4, WALL wiring is M9). Fielders and runners are
+  // deliberately logical entities, never Rapier bodies (M4 design doc), so the
+  // ball stays this world's ONLY dynamic body and placeBall's accumulator reset
+  // remains safe — closing the M2 caveat recorded in CLAUDE.md §6.2.
+  const blockers = new Map<string, RAPIER.RigidBody>();
+
+  // Drained every substep; `true` = auto-clear drained events.
+  const eventQueue = new RAPIER.EventQueue(true);
+  let bounced = false;
+
   let accumulator = 0;
 
   function placeBall(position: Vec3): void {
@@ -77,6 +98,7 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
     ballBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
     ballBody.resetForces(true);
     ballBody.resetTorques(true);
+    bounced = false; // fresh flight — ground-contact tracking restarts
     // Deliberate: re-anchor the substep phase to the spawn/pitch event, discarding
     // any sub-timestep remainder (<1/60 s) so trajectories are independent of when
     // the triggering message landed within a frame. The accumulator is WORLD time —
@@ -122,6 +144,9 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
     applyHit(params: HitParams): void {
       ballBody.setLinvel(params.velocity, true);
       ballBody.setAngvel(params.angularVelocity, true);
+      // A hit keeps the ball's position (no placeBall), so restart bounce
+      // tracking here explicitly: caught-before-bounce is per flight.
+      bounced = false;
     },
 
     step(dtSeconds: number): void {
@@ -131,7 +156,18 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
       const EPSILON = 1e-9;
       while (accumulator >= PHYSICS.FIXED_TIMESTEP - EPSILON) {
         applyMagnus();
-        world.step();
+        world.step(eventQueue);
+        // Event-accurate bounce detection (spec §8): a fast graze can contact
+        // the ground BETWEEN end-of-substep poses, which a pose poll like
+        // isBallAtPost would miss — see the known-issues note in CLAUDE.md §6.4.
+        eventQueue.drainCollisionEvents((handle1, handle2, started) => {
+          if (!started) return;
+          const ball = ballCollider.handle;
+          const ground = groundCollider.handle;
+          if ((handle1 === ball && handle2 === ground) || (handle1 === ground && handle2 === ball)) {
+            bounced = true;
+          }
+        });
         accumulator -= PHYSICS.FIXED_TIMESTEP;
       }
     },
@@ -155,7 +191,32 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
       return world.intersectionPair(sensor, ballCollider);
     },
 
+    hasBounced(): boolean {
+      return bounced;
+    },
+
+    setBlocker(id: string, position: Vec3, halfHeight: number, radius: number): void {
+      const existing = blockers.get(id);
+      if (existing !== undefined) {
+        existing.setTranslation(position, true); // reposition, never duplicate
+        return;
+      }
+      const body = world.createRigidBody(
+        RAPIER.RigidBodyDesc.fixed().setTranslation(position.x, position.y, position.z),
+      );
+      world.createCollider(RAPIER.ColliderDesc.capsule(halfHeight, radius), body);
+      blockers.set(id, body);
+    },
+
+    clearBlocker(id: string): void {
+      const body = blockers.get(id);
+      if (body === undefined) return;
+      world.removeRigidBody(body); // attached colliders are removed with the body
+      blockers.delete(id);
+    },
+
     dispose(): void {
+      eventQueue.free();
       world.free();
     },
   };

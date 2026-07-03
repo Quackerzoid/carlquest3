@@ -223,4 +223,117 @@ describe('PhysicsModule', () => {
       expect(() => physics.isBallAtPost(-1)).toThrow(RangeError);
     });
   });
+
+  describe('bounce tracking (spec §8 caught-before-bounce)', () => {
+    it('hasBounced is false after spawnBall and while a pitch is airborne', () => {
+      physics.spawnBall();
+      expect(physics.hasBounced()).toBe(false);
+
+      physics.applyPitch({ velocity: { x: 0, y: 2, z: -10 }, angularVelocity: { x: 0, y: 0, z: 0 } });
+      expect(physics.hasBounced()).toBe(false);
+      run(physics, 0.1); // from 1 m release with upward velocity: still well aloft
+      expect(physics.getBallState().position.y).toBeGreaterThan(CONST.PHYSICS.BALL_RADIUS * 2);
+      expect(physics.hasBounced()).toBe(false);
+    });
+
+    it('becomes true once a dropped ball contacts the ground', () => {
+      physics.spawnBall({ x: 0, y: 1, z: 0 });
+      run(physics, 1); // free fall from 1 m lands in ~0.44 s
+      expect(physics.hasBounced()).toBe(true);
+    });
+
+    it('registers a fast grazing bounce even when no end-of-substep pose touches the ground', () => {
+      // 0.264 m of fall at 20 m/s down = contact ~0.013 s in, INSIDE the first
+      // substep; the rebound (restitution 0.4 => ~8 m/s up) lifts the ball clear
+      // again before the substep ends, so a pose poll would never see contact.
+      physics.applyPitch({
+        origin: { x: 0, y: 0.3, z: 0 },
+        velocity: { x: 0, y: -20, z: 30 },
+        angularVelocity: { x: 0, y: 0, z: 0 },
+      });
+      run(physics, 0.25);
+      expect(physics.getBallState().position.y).toBeGreaterThan(0.2); // airborne again at check time
+      expect(physics.hasBounced()).toBe(true);
+    });
+
+    it('is reset by spawnBall, applyPitch and applyHit', () => {
+      const bounce = (): void => {
+        physics.spawnBall({ x: 0, y: 1, z: 0 });
+        run(physics, 1);
+        expect(physics.hasBounced()).toBe(true);
+      };
+
+      bounce();
+      physics.spawnBall();
+      expect(physics.hasBounced()).toBe(false);
+
+      bounce();
+      physics.applyPitch({ velocity: { x: 0, y: 0, z: -10 }, angularVelocity: { x: 0, y: 0, z: 0 } });
+      expect(physics.hasBounced()).toBe(false);
+
+      bounce();
+      physics.applyHit({ velocity: { x: 0, y: 8, z: 15 }, angularVelocity: { x: 0, y: 0, z: 0 } });
+      expect(physics.hasBounced()).toBe(false);
+    });
+  });
+
+  describe('blockers', () => {
+    // Capsule centred at y = 1 spanning y in [-0.2, 2.2]: a ground-level ball
+    // rolling along x = 0 towards +z meets its front face at z ~ 3.66.
+    const inPath = { x: 0, y: 1, z: 4 };
+    const outOfPath = { x: 20, y: 1, z: 4 };
+    const HALF_HEIGHT = 0.9;
+    const RADIUS = 0.3;
+
+    /** Rolls the ball along the ground from the origin towards +z, past z = 4 if unobstructed. */
+    function roll(): void {
+      physics.spawnBall({ x: 0, y: CONST.PHYSICS.BALL_RADIUS, z: 0 });
+      physics.applyHit({ velocity: { x: 0, y: 0, z: 10 }, angularVelocity: { x: 0, y: 0, z: 0 } });
+      run(physics, 1.2);
+    }
+
+    it('a capsule blocker stops a rolling ball that passes unimpeded without one', () => {
+      roll();
+      expect(physics.getBallState().position.z).toBeGreaterThan(inPath.z);
+
+      physics.setBlocker('whale', inPath, HALF_HEIGHT, RADIUS);
+      roll();
+      expect(physics.getBallState().position.z).toBeLessThan(inPath.z);
+    });
+
+    it('clearBlocker removes the obstacle and is a silent no-op for unknown ids', () => {
+      physics.setBlocker('whale', inPath, HALF_HEIGHT, RADIUS);
+      physics.clearBlocker('whale');
+      roll();
+      expect(physics.getBallState().position.z).toBeGreaterThan(inPath.z);
+
+      expect(() => physics.clearBlocker('nobody')).not.toThrow();
+    });
+
+    it('setBlocker with an existing id repositions rather than duplicates', () => {
+      physics.setBlocker('whale', inPath, HALF_HEIGHT, RADIUS);
+      physics.setBlocker('whale', outOfPath, HALF_HEIGHT, RADIUS);
+      roll();
+      // A duplicate left at the old position would still block here.
+      expect(physics.getBallState().position.z).toBeGreaterThan(inPath.z);
+
+      physics.setBlocker('whale', inPath, HALF_HEIGHT, RADIUS);
+      roll();
+      expect(physics.getBallState().position.z).toBeLessThan(inPath.z);
+    });
+
+    it('a blocker contact does not set hasBounced (ground only)', () => {
+      physics.setBlocker('whale', inPath, HALF_HEIGHT, RADIUS);
+      physics.applyPitch({
+        origin: { x: 0, y: 1, z: 0 },
+        velocity: { x: 0, y: 0, z: 15 },
+        angularVelocity: { x: 0, y: 0, z: 0 },
+      });
+      run(physics, 0.3); // strikes the capsule at ~0.24 s, rebounds while still airborne
+      const { position, velocity } = physics.getBallState();
+      expect(velocity.z).toBeLessThan(0); // rebounded off the capsule
+      expect(position.y).toBeGreaterThan(CONST.PHYSICS.BALL_RADIUS * 2); // never touched the ground
+      expect(physics.hasBounced()).toBe(false);
+    });
+  });
 });
