@@ -60,7 +60,9 @@ export function resolveSwing(
 ): SwingResult {
   const window = timingWindow(stats.reflex, windowMult);
   const timing = timingFactor(timingError, window);
-  if (timing <= 0) return { contact: false };
+  // NaN-safe: a degenerate window (e.g. windowMult 0) can make timingFactor NaN.
+  // `!(timing > 0)` catches both `timing <= 0` and `NaN`, resolving to a miss either way.
+  if (!(timing > 0)) return { contact: false };
 
   const direction = normaliseAim(input.aim);
   const speed = exitVelocity(stats.power, timing);

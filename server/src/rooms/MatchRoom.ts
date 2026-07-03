@@ -1,4 +1,4 @@
-import { Room, type Client } from '@colyseus/core';
+import { Room, type Client, type RoomException } from '@colyseus/core';
 import {
   CONST,
   getCharacter,
@@ -26,6 +26,16 @@ function isVec3(v: unknown): v is { x: number; y: number; z: number } {
   if (typeof v !== 'object' || v === null) return false;
   const c = v as Record<string, unknown>;
   return isFiniteNumber(c.x) && isFiniteNumber(c.y) && isFiniteNumber(c.z);
+}
+
+/**
+ * Coerce an arbitrary message payload to a safe object before property access.
+ * A client can send a message with no payload (`room.send('pitch')`, payload
+ * `undefined`) or an explicit `null` payload; without this guard `m.aim` throws
+ * a TypeError ahead of the isVec3 validation below.
+ */
+function asRecord(message: unknown): Record<string, unknown> {
+  return typeof message === 'object' && message !== null ? (message as Record<string, unknown>) : {};
 }
 
 /** Authoritative match room. M3: single-player pitch→swing demo loop. */
@@ -63,8 +73,22 @@ export class MatchRoom extends Room<MatchState> {
     this.physics.dispose();
   }
 
+  /**
+   * Belt-and-braces: log and swallow any exception the framework catches from a
+   * lifecycle/message handler instead of letting it escape as a process-level
+   * crash. The isVec3/isFiniteNumber validation above should make this
+   * unreachable for pitch/swing, but this is the last line of defence for any
+   * other uncaught throw in a room callback.
+   */
+  override onUncaughtException(
+    error: RoomException<this>,
+    methodName: 'onCreate' | 'onAuth' | 'onJoin' | 'onLeave' | 'onDispose' | 'onMessage' | 'setSimulationInterval' | 'setInterval' | 'setTimeout',
+  ): void {
+    console.error(`[MatchRoom] uncaught exception in ${methodName}:`, error);
+  }
+
   private handlePitch(_client: Client, message: unknown): void {
-    const m = message as Partial<PitchInput>;
+    const m = asRecord(message) as Partial<PitchInput>;
     if (this.state.ballLive || !isVec3(m.aim) || !isFiniteNumber(m.spinInput)) {
       this.state.demoLog = 'pitch rejected (ball live or malformed input)';
       return;
@@ -81,7 +105,7 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   private handleSwing(_client: Client, message: unknown): void {
-    const m = message as Partial<SwingMessage>;
+    const m = asRecord(message) as Partial<SwingMessage>;
     // M3 decision: the client 'timing' field is accepted but ignored; the server's
     // own sim-time is authoritative. Revisit for latency compensation in Milestone 6.
     if (!this.state.ballLive || this.swung || !isVec3(m.aim) || !isFiniteNumber(m.spinInput)) {

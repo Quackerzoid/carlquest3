@@ -73,6 +73,40 @@ describe('MatchRoom', () => {
     expect(room.state.demoLog).toContain('rejected');
   });
 
+  it('rejects a pitch message sent with no payload instead of crashing', async () => {
+    const room = await colyseus.createRoom('match', {});
+    const client = await colyseus.connectTo(room);
+    client.send('pitch');
+    await room.waitForNextSimulationTick();
+    expect(room.state.ballLive).toBe(false);
+    expect(room.state.demoLog).toContain('rejected');
+  });
+
+  it('rejects a swing message sent with a null payload instead of crashing', async () => {
+    const room = await colyseus.createRoom('match', {});
+    const client = await colyseus.connectTo(room);
+    client.send('swing', null);
+    await room.waitForNextSimulationTick();
+    expect(room.state.ballLive).toBe(false);
+    expect(room.state.demoLog).toContain('rejected');
+  });
+
+  it('stays responsive to a valid pitch after payload-less pitch/swing messages', async () => {
+    const room = await colyseus.createRoom('match', {});
+    const client = await colyseus.connectTo(room);
+    client.send('pitch');
+    await room.waitForNextSimulationTick();
+    client.send('swing', null);
+    await room.waitForNextSimulationTick();
+    client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+    await room.waitForNextSimulationTick();
+    await client.waitForNextPatch();
+    expect(client.state.ballLive).toBe(true);
+    const speed = Math.hypot(client.state.ball.vx, client.state.ball.vy, client.state.ball.vz);
+    expect(speed).toBeGreaterThan(20);
+    expect(speed).toBeLessThan(27);
+  });
+
   it('full loop: pitch, wait for plane crossing, swing connects and reverses flight', async () => {
     const room = await colyseus.createRoom('match', {});
     const client = await colyseus.connectTo(room);

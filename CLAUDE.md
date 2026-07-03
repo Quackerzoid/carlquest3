@@ -128,5 +128,9 @@ Entry format:
 - Client WebGL renders very slowly in the sandboxed preview browser (software rasteriser) — verification used headless Edge instead; real browsers are fine.
 - `isBallAtPost` is a discrete end-of-substep poll of Rapier's intersection graph: a very fast grazing pass can cross a sensor between poses and never register. Fine for M4 run-outs as designed (ball is delivered TO the post and stays/bounces); if fly-through detection is ever needed, switch to Rapier collision events (EventQueue) rather than widening the sensor.
 - MatchRoom's `demoLog` is a stringly-typed placeholder (tests match on 'rejected' substrings) — replace with structured play-outcome events in M5 (spec §7 `playOutcome`).
-- Swing-vs-plane-crossing same-tick ordering gives up to one tick (~16.7 ms) of timing ambiguity — inherent to discrete ticks, acceptable at BASE_TIMING_WINDOW 0.25 s; noted for M6 latency work.
+- Swing-vs-plane-crossing same-tick ordering gives up to one tick (~16.7 ms) of timing ambiguity, and the pre-crossing projection is linear (ignores remaining Magnus/gravity curvature) — same error class; fold both into M6 latency work.
+- Contact has no lateral/height proximity requirement — a swing "connects" wherever the ball crosses the z-plane (spec §5 defines contact purely by timing). Revisit with Fielding/Rules (M4/M5).
+- No per-client role gating in M3: either joined client may pitch and swing; phase validation approximated by the ballLive gate while phase = LOBBY. Superseded by M5 state machine + M6/M7 roles.
+- Huge-but-finite aim components (~1e308) overflow normalisation to a zero-velocity pitch/hit (self-inflicted only, no NaN); pre-scale by max component if it ever matters.
+- Tuning note (TUNING candidate): a max-power 60°-elevation hit flies ~6.0 s vs PLAY_TIMEOUT_S = 6 — the ball can be despawned mid-air at the extreme.
 - The ball never sleeps: Magnus `resetForces`/`addForce` wakes it every substep even at rest. Harmless at one body / 60 Hz; skip near-zero forces if it ever matters.

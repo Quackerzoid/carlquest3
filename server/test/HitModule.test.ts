@@ -92,6 +92,11 @@ describe('resolveSwing', () => {
     }
   });
 
+  it('a NaN timing factor (zero window from windowMult 0) resolves as a miss, not NaN velocities', () => {
+    const r = resolveSwing(carl.stats, { aim: FLAT_AIM, spinInput: 0 }, 0, 0);
+    expect(r.contact).toBe(false);
+  });
+
   it('is pure — repeat calls identical, input unmutated', () => {
     const input = { aim: { x: 1, y: 0.5, z: 1 }, spinInput: 0.3 };
     expect(resolveSwing(carl.stats, input, 0.02)).toEqual(resolveSwing(carl.stats, input, 0.02));
