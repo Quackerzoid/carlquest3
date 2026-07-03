@@ -1,0 +1,26 @@
+{
+  "name": "carlquest",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Carl Quest Sports — multiplayer 3D rounders",
+  "workspaces": ["shared", "server", "client"],
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,green \"npm run dev -w @carlquest/server\" \"npm run dev -w @carlquest/client\"",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "build": "npm run build --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.5.0",
+    "concurrently": "^8.2.2",
+    "eslint": "^9.5.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^7.13.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": { "node": ">=20" }
+}
