@@ -17,3 +17,24 @@ export interface Vec3 {
   y: number;
   z: number;
 }
+
+/** Velocities a pitch imparts to the ball; PitchModule computes these from stats (M3). */
+export interface PitchParams {
+  /** Spawn point; defaults to the bowling square at BALL_RELEASE_HEIGHT. */
+  origin?: Vec3;
+  velocity: Vec3;
+  angularVelocity: Vec3;
+}
+
+/** Velocities a resolved swing imparts to the ball at its current position. */
+export interface HitParams {
+  velocity: Vec3;
+  angularVelocity: Vec3;
+}
+
+/** Authoritative ball kinematics snapshot. */
+export interface BallState {
+  position: Vec3;
+  velocity: Vec3;
+  angularVelocity: Vec3;
+}

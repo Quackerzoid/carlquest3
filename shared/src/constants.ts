@@ -14,6 +14,10 @@ const PHYSICS = {
   BALL_ANGULAR_DAMPING: 0.02,
   MAGNUS_K: 0.0006,
   GROUND_FRICTION: 0.6,
+  /** Cuboid ground half-thickness; top face sits at y = 0 (M2 design decision). */
+  GROUND_THICKNESS: 0.1,
+  /** Default ball spawn height above the bowling square (M2 design decision). */
+  BALL_RELEASE_HEIGHT: 1.0,
 } as const;
 
 const FIELD = {
@@ -34,6 +38,8 @@ const FIELD = {
   GROUND_HALF_EXTENT: 40,
   BATTING_SQUARE_SIZE: 2,
   BOWLING_SQUARE_SIZE: 2.5,
+  /** Run-out sensor cylinder radius around each post (M2 design decision). */
+  POST_SENSOR_RADIUS: 0.5,
 } as const;
 
 const GAME = {

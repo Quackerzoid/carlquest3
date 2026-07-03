@@ -38,6 +38,14 @@ describe('constants', () => {
     it('pins ground friction to 0.6', () => {
       expect(CONST.PHYSICS.GROUND_FRICTION).toBe(0.6);
     });
+
+    it('pins the default ball release height to 1.0 m', () => {
+      expect(CONST.PHYSICS.BALL_RELEASE_HEIGHT).toBe(1.0);
+    });
+
+    it('pins the ground collider thickness to 0.1 m', () => {
+      expect(CONST.PHYSICS.GROUND_THICKNESS).toBe(0.1);
+    });
   });
 
   describe('GAME — spec §8b', () => {
@@ -141,6 +149,10 @@ describe('constants', () => {
 
     it('ensures bowling square size is positive', () => {
       expect(CONST.FIELD.BOWLING_SQUARE_SIZE).toBeGreaterThan(0);
+    });
+
+    it('pins the post run-out sensor radius to 0.5 m', () => {
+      expect(CONST.FIELD.POST_SENSOR_RADIUS).toBe(0.5);
     });
   });
 
