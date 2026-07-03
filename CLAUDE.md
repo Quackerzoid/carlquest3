@@ -65,10 +65,10 @@ This section is the anti-hallucination ledger. It is the **only** trusted record
 
 ### 6.1 Current State (overwrite to reflect reality)
 
-- **Milestone:** 2 (PhysicsModule) — COMPLETE: final review passed (0 critical; 1 important doc item fixed pre-merge), merged to main, tagged `m2-physics`. (M1 = `m1-scaffold`.) Next: Milestone 3 (PitchModule + HitModule single-player loop) — carry the `step()` accumulator clamp from §6.4 into its plan.
-- **Modules implemented:** `/shared` (MatchPhase/MATCH_PHASES/Vec3 + PitchParams/HitParams/BallState; deep-frozen CONST.PHYSICS/FIELD/GAME); `/server` (Colyseus bootstrap, empty `MatchRoom`; **PhysicsModule**: Rapier world via async `createPhysicsModule()`, ground top at y=0, ball with CCD/mass 0.16/restitution 0.4 (Max combine rule), 4 posts + run-out sensors, fixed 1/60 accumulator stepping, Magnus `F = MAGNUS_K·(ω×v)` per substep, `spawnBall/applyPitch/applyHit/step/getBallState/isBallAtPost/dispose`); `/client` (Three.js scene, render-only). No pitch/hit/rules logic yet.
-- **Test status:** 57/57 passing (39 shared, 16 PhysicsModule incl. §9.2 Magnus acceptance + bounce/damping + exact-equality determinism, 2 room); `npm run check` green — re-verified on merged main (6cab295 = tag `m2-physics`).
-- **Open worktrees/branches:** none — milestone worktree and branch removed after merge. Not pushed to origin (awaiting user direction).
+- **Milestone:** 3 (Pitch/Hit single-player loop) — complete on branch, pending final branch review + merge + tag `m3-pitch-hit`. (M1 = `m1-scaffold`, M2 = `m2-physics`.)
+- **Modules implemented:** `/shared` (types incl. StatBlock/AbilityId/Character/PitchInput/SwingInput; deep-frozen CONST; **formulas.ts** — ALL §5 formulas as tested pure functions; **characters.ts** — §3 roster, sole data source); `/server` (PhysicsModule (M2); **PitchModule.resolvePitch**; **HitModule.resolveSwing** (miss when |err| ≥ window); **MatchRoom demo loop** — 60 Hz `setSimulationInterval` with dt clamped to SIM_MAX_CATCHUP, synced BallSchema + ballLive + demoLog, `pitch`/`swing` handlers with idle/live + finite-number validation, server-authoritative timing via batting-plane crossing, demo cast Kian/Carl); `/client` (SceneModule + **NetModule** (colyseus.js join), **RenderModule** (ball view), **InputModule** (A/S/D spin, P pitch, Space swing), status line). No fielding/running/rules yet.
+- **Test status:** 112/112 passing (72 shared: 43 constants + 14 formulas + 15 characters; 40 server: 16 physics + 9 pitch + 9 hit + 6 room incl. full pitch→swing integration); `npm run check` green. Acceptance demonstrated: scripted WS client — pitch curved (Magnus), swing timing factor 0.99, exit 33.3 m/s (= 34 × 0.99 per §5); per-frame canvas scan proved the ball renders in-browser (35 frames, 11→62 px along authoritative trajectory).
+- **Open worktrees/branches:** `.claude/worktrees/m3-pitch-hit` on `worktree-m3-pitch-hit` (to be merged + tagged). origin/main current as of M3 planning docs (user pushes manually).
 
 ### 6.2 Decisions Record (append-only)
 
@@ -86,6 +86,12 @@ This section is the anti-hallucination ledger. It is the **only** trusted record
 | 2026-07-03 | Ball collider uses `CoefficientCombineRule.Max` for restitution | Rapier default Average blends ball 0.4 with unset ground 0 → effective 0.2; Max makes the spec's 0.4 the effective coefficient. |
 | 2026-07-03 | `@dimforge/rapier3d-compat` pinned at ^0.14.0 | First Rapier usage; version recorded for determinism (same binary ⇒ same trajectories). |
 | 2026-07-03 | `placeBall` resets the step accumulator (pitch re-anchors substep phase) | Makes pitch trajectories independent of message arrival within a frame. The accumulator is WORLD time — MUST be revisited in M4 when fielder bodies join the world (final-review finding). |
+| 2026-07-03 | Hit launch direction from the batter's aim vector, elevation clamped −10°..60° | Spec §1 names launch angle but §5 gives no formula; USER-APPROVED choice (aim-based) over timing-derived alternatives. |
+| 2026-07-03 | M3 new tunables: HIT_ELEVATION_MIN/MAX_DEG −10/60, PITCH_ELEVATION_MAX_DEG 20, PLAY_TIMEOUT_S 6, BALL_REST_SPEED 0.1, BALL_REST_TIME_S 1, SIM_MAX_CATCHUP 0.25 | Spec silent; needed for aim clamps, demo play-end and the tick clamp. |
+| 2026-07-03 | Client `swing.timing` field accepted but IGNORED in M3; server sim-time (batting-plane crossing) is authoritative | Server-authoritative principle; latency compensation revisited in M6 networking. |
+| 2026-07-03 | Pitch/hit spin input = scalar in [−1,1] mapped to vertical-axis sidespin | §7 gives `spinInput` without semantics; sidespin is what Magnus turns into visible curve. |
+| 2026-07-03 | Demo cast fixed: pitcher Kian, batter Carl | M3 single-player loop needs stats before the draft exists (M7). |
+| 2026-07-03 | Degenerate aim vectors (zero, non-finite, purely vertical) fall back to sane defaults instead of throwing | Player input must never crash the room or inject NaN into physics (review finding, fixed in both modules). |
 
 ### 6.3 Changelog (append-only, newest first)
 
@@ -97,6 +103,11 @@ Entry format:
 - Verified: exact command(s) run + result (e.g. `npm run check` → 0 errors, 42 tests passed)
 - Notes/deviations: anything the spec didn't cover, or "none"
 ```
+
+### 2026-07-03 — [Milestone 3] Pitch/Hit single-player loop (Tasks 1–6)
+- Changed: shared/src/{formulas,characters}.ts (new) + types/constants/index + 3 test files; server/src/modules/{PitchModule,HitModule}.ts (new) + tests; server/src/rooms/{MatchState,MatchRoom}.ts (demo loop) + integration tests; client/src/{NetModule,RenderModule,InputModule}.ts (new), main.ts, index.html, package.json (+colyseus.js); eslint.config.js (ignore scratch dirs).
+- Verified: `npm run check` → typecheck ×3 clean, ESLint clean, 112/112 tests. Acceptance (spec §9.3): scripted Colyseus client over real WS — pitch curved via Magnus (x −0.13 by the plane), swing at z=0.51 connected timing factor 0.99, exit 33.3 m/s = exitVelocity(8, 0.99) exactly; in-browser per-frame canvas scan proved the rendered ball tracks the authoritative trajectory (35 frames, 11→62 px). Server integration test proves the loop headlessly.
+- Notes/deviations: see new §6.2 rows (aim-based launch user-approved; swing.timing ignored; sidespin mapping; demo cast; degenerate-aim guards). Review process caught a real NaN-injection bug (vertical aim) pre-merge; fixed TDD in both modules.
 
 ### 2026-07-03 — [Milestone 2] PhysicsModule (Tasks 1–5)
 - Changed: shared/src/types.ts (+PitchParams/HitParams/BallState), shared/src/constants.ts (+3 tunables), shared/test/constants.test.ts (39 tests); server/package.json (+@dimforge/rapier3d-compat@0.14.0); server/src/modules/PhysicsModule.ts (new); server/test/PhysicsModule.test.ts (16 tests).
@@ -116,5 +127,6 @@ Entry format:
 - `server/package.json` `build` script aliases typecheck (no emit config yet); real build wiring deferred until a milestone needs emitted server JS.
 - Client WebGL renders very slowly in the sandboxed preview browser (software rasteriser) — verification used headless Edge instead; real browsers are fine.
 - `isBallAtPost` is a discrete end-of-substep poll of Rapier's intersection graph: a very fast grazing pass can cross a sensor between poses and never register. Fine for M4 run-outs as designed (ball is delivered TO the post and stays/bounces); if fly-through detection is ever needed, switch to Rapier collision events (EventQueue) rather than widening the sensor.
-- `PhysicsModule.step()` has no catch-up clamp: a wall-clock caller that stalls would trigger a synchronous substep burst. MUST add an accumulator clamp (e.g. 0.25 s) when M3 wires MatchRoom's clock to `step()` — carry into the M3 plan.
+- MatchRoom's `demoLog` is a stringly-typed placeholder (tests match on 'rejected' substrings) — replace with structured play-outcome events in M5 (spec §7 `playOutcome`).
+- Swing-vs-plane-crossing same-tick ordering gives up to one tick (~16.7 ms) of timing ambiguity — inherent to discrete ticks, acceptable at BASE_TIMING_WINDOW 0.25 s; noted for M6 latency work.
 - The ball never sleeps: Magnus `resetForces`/`addForce` wakes it every substep even at rest. Harmless at one body / 60 Hz; skip near-zero forces if it ever matters.
