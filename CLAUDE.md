@@ -65,10 +65,10 @@ This section is the anti-hallucination ledger. It is the **only** trusted record
 
 ### 6.1 Current State (overwrite to reflect reality)
 
-- **Milestone:** 3 (Pitch/Hit single-player loop) — COMPLETE: final review found 1 Critical (payload-less message crashed the process), fixed + regression-tested pre-merge; merged to main, tagged `m3-pitch-hit`. (M1 = `m1-scaffold`, M2 = `m2-physics`.) Next: Milestone 4 (FieldingModule + RunningModule) — revisit the accumulator-reset and world-time §6.2/§6.4 items when fielder bodies join the physics world.
-- **Modules implemented:** `/shared` (types incl. StatBlock/AbilityId/Character/PitchInput/SwingInput; deep-frozen CONST; **formulas.ts** — ALL §5 formulas as tested pure functions; **characters.ts** — §3 roster, sole data source); `/server` (PhysicsModule (M2); **PitchModule.resolvePitch**; **HitModule.resolveSwing** (miss when |err| ≥ window); **MatchRoom demo loop** — 60 Hz `setSimulationInterval` with dt clamped to SIM_MAX_CATCHUP, synced BallSchema + ballLive + demoLog, `pitch`/`swing` handlers with idle/live + finite-number validation, server-authoritative timing via batting-plane crossing, demo cast Kian/Carl); `/client` (SceneModule + **NetModule** (colyseus.js join), **RenderModule** (ball view), **InputModule** (A/S/D spin, P pitch, Space swing), status line). No fielding/running/rules yet.
-- **Test status:** 116/116 passing (72 shared; 44 server: 16 physics + 9 pitch + 10 hit + 9 room incl. payload-less rejection regressions); `npm run check` green — re-verified on merged main (44a1db9 = tag `m3-pitch-hit`). Acceptance demonstrated: scripted WS client — pitch curved (Magnus), swing timing factor 0.99, exit 33.3 m/s (= 34 × 0.99 per §5); per-frame canvas scan proved the ball renders in-browser (35 frames, 11→62 px along authoritative trajectory).
-- **Open worktrees/branches:** none — milestone worktree and branch removed after merge. Local tags m1/m2/m3 not yet pushed (user pushes manually).
+- **Milestone:** 4 (Fielding + Running) — IN PROGRESS: plan Tasks 1–4 of 7 merged to main (97eb82c, delivered via git bundle from an external Claude session, verified locally before merge). Remaining: Task 5 (MatchRoom wiring — schema, runDecision, outcome resolution), Task 6 (client fielders/runner/run keys/outcome display), Task 7 (full verification + acceptance + tag). Plan: `docs/superpowers/plans/2026-07-03-milestone-4-fielding-running.md`. (M1 = `m1-scaffold`, M2 = `m2-physics`, M3 = `m3-pitch-hit`.)
+- **Modules implemented:** `/shared` (types incl. StatBlock/AbilityId/Character/PitchInput/SwingInput + **RunDecisionInput/PlayOutcome/FielderSetup**; deep-frozen CONST incl. M4 fielding tunables + FIELDING_POSITIONS; **formulas.ts** — ALL §5 formulas + **approachPenalty**; **characters.ts** — §3 roster; **rng.ts** — mulberry32 `createRng`); `/server` (PhysicsModule (M2 + **hasBounced()** via Rapier EventQueue + **setBlocker/clearBlocker** capsule API); PitchModule; HitModule; **FieldingModule** — chaser+cover pursuit, entry-latched pCatch roll, caught-vs-gathered, ballistic throw solve, sprint/throw stamina drain; **RunningModule** — post-to-post runner, stop/go, pass-through, post-4 = rounder, `exposedPost()`; MatchRoom demo loop — NOT yet wired to fielding/running); `/client` (SceneModule + NetModule + RenderModule (ball only) + InputModule — no fielder/runner rendering yet). No rules engine yet.
+- **Test status:** 175/175 passing (95 shared: +4 rng, +1 formulas, +10 constants; 80 server: 24 physics + 9 pitch + 10 hit + 22 fielding + 15 running + 9 room); `npm run check` green on merged main (97eb82c) — typecheck ×3 clean, ESLint clean. M3 acceptance evidence unchanged; M4 acceptance NOT yet run (needs Task 5–7).
+- **Open worktrees/branches:** none — bundle branch `bundle-m4` deleted after fast-forward merge. Local tags m1/m2/m3 not yet pushed (user pushes manually). `carlquest3m4.bundle` sits untracked in the repo root (source artefact; safe to delete).
 
 ### 6.2 Decisions Record (append-only)
 
@@ -92,6 +92,12 @@ This section is the anti-hallucination ledger. It is the **only** trusted record
 | 2026-07-03 | Pitch/hit spin input = scalar in [−1,1] mapped to vertical-axis sidespin | §7 gives `spinInput` without semantics; sidespin is what Magnus turns into visible curve. |
 | 2026-07-03 | Demo cast fixed: pitcher Kian, batter Carl | M3 single-player loop needs stats before the draft exists (M7). |
 | 2026-07-03 | Degenerate aim vectors (zero, non-finite, purely vertical) fall back to sane defaults instead of throwing | Player input must never crash the room or inject NaN into physics (review finding, fixed in both modules). |
+| 2026-07-03 | M4 Tasks 1–4 implemented in an external Claude session, delivered as `carlquest3m4.bundle`, verified locally (`npm run check` 175/175) before fast-forward merge | User-directed workflow for this batch. |
+| 2026-07-03 | `RunDecisionInput` message shape added to §7 contracts | USER-APPROVED deviation (per bundle commit 5823b2c); spec §7 lacked a run stop/go message. |
+| 2026-07-03 | Fielders are kinematic (module-computed positions), NOT Rapier bodies; ball remains the world's only dynamic body | Closes the M2 `placeBall` accumulator-reset caveat by design (no other body loses world time). WALL blocker capsule API exists but activation lands in M9. |
+| 2026-07-03 | M4 new tunables: APPROACH_W 0.35, APPROACH_REF_SPEED 30, THROW_RELEASE_DELAY_S 0.5, SPRINT_STAMINA_COST_PER_S 0.15, THROW_STAMINA_COST 0.5, CATCH_HEIGHT_MAX 2.5; FIELDING_POSITIONS 9-slot placeholder layout (slot 0 = bowling square) | Spec silent; needed for catch rolls, throws, fatigue. Real positioning UI lands M8. |
+| 2026-07-03 | Deterministic catch rolls via seeded mulberry32 `createRng` in `/shared/rng.ts` | Server-authoritative determinism; one pCatch roll per catch-radius entry (entry-latched). |
+| 2026-07-03 | Fielding ability hooks left as neutral defaults | Abilities (QUICK_DRAW etc.) wire in at M9 per plan. |
 
 ### 6.3 Changelog (append-only, newest first)
 
@@ -103,6 +109,11 @@ Entry format:
 - Verified: exact command(s) run + result (e.g. `npm run check` → 0 errors, 42 tests passed)
 - Notes/deviations: anything the spec didn't cover, or "none"
 ```
+
+### 2026-07-03 — [Milestone 4] Fielding/Running server layer (Tasks 1–4, via bundle)
+- Changed: shared/src/{types,constants,formulas,index}.ts, shared/src/rng.ts (new) + 3 test files; server/src/modules/PhysicsModule.ts (hasBounced via EventQueue, setBlocker/clearBlocker), server/src/modules/{FieldingModule,RunningModule}.ts (new) + tests; docs/superpowers/{plans,specs} M4 documents. Source: `carlquest3m4.bundle` (external Claude session), branch fast-forward-merged to main at 97eb82c.
+- Verified: `npm run check` on the bundle branch pre-merge → typecheck ×3 clean, ESLint clean, 175/175 tests (10 files). `git bundle verify` OK; base commit = prior main head, so a pure fast-forward. `package-lock.json` churn from local `npm install` (libc metadata) discarded.
+- Notes/deviations: Tasks 5–7 (MatchRoom wiring, client, acceptance) NOT included — milestone still open, no m4 tag. New §6.2 rows: RunDecisionInput, kinematic fielders, M4 tunables, seeded RNG, neutral ability hooks.
 
 ### 2026-07-03 — [Milestone 3] Pitch/Hit single-player loop (Tasks 1–6)
 - Changed: shared/src/{formulas,characters}.ts (new) + types/constants/index + 3 test files; server/src/modules/{PitchModule,HitModule}.ts (new) + tests; server/src/rooms/{MatchState,MatchRoom}.ts (demo loop) + integration tests; client/src/{NetModule,RenderModule,InputModule}.ts (new), main.ts, index.html, package.json (+colyseus.js); eslint.config.js (ignore scratch dirs).
