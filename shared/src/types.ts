@@ -97,12 +97,39 @@ export interface RunDecisionInput {
 /** How a play resolved — the M4 subset of the spec §7 playOutcome; M5 adds half-rounder/no-ball. */
 export type PlayOutcome =
   | { kind: 'caught'; by: string }
-  | { kind: 'runOut'; atPost: number } // 1–4
-  | { kind: 'safe'; atPost: number } // 0–4 (0 = batting square)
+  | { kind: 'runOut'; atPost: number; runnerId: string } // atPost 1–4
+  | { kind: 'safe'; atPost: number; runnerId: string } // atPost 0–4 (0 = batting square); runnerId = batter-runner of the play
   | { kind: 'rounder' };
 
 /** A fielder and their starting slot — FieldingModule construction input (M4). */
 export interface FielderSetup {
   character: Character;
   position: { x: number; z: number };
+}
+
+/** Which of the two teams (M5 rules engine; draft/innings assignment lands elsewhere). */
+export type TeamSide = 'A' | 'B';
+
+/** RulesModule.resolvePlay() output for one play — the authoritative scoring/out record (M5). */
+export interface PlayResolution {
+  cause: PlayOutcome;
+  /** Character ids put out this play. */
+  outs: string[];
+  /** Integer half-rounders banked this play. */
+  scoreDeltaHalves: number;
+  /** Who batted this play. */
+  batterId: string;
+}
+
+/**
+ * Per-runner facts RunningModule.settlePlay() reports and RulesModule.resolvePlay()
+ * consumes. Lives in /shared so Tasks 2 and 3 (parallel) both import it from here,
+ * not from each other.
+ */
+export interface SettlementFact {
+  runnerId: string;
+  ownHit: boolean;
+  highestPost: number;
+  home: boolean;
+  out: boolean;
 }

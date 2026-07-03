@@ -294,7 +294,7 @@ describe('MatchRoom', () => {
     expect(haltedAtPost1).toBe(true);
     expect(room.state.ballLive).toBe(false);
     const outcome = JSON.parse(room.state.lastOutcome) as PlayOutcome;
-    expect(outcome).toEqual({ kind: 'safe', atPost: 1 });
+    expect(outcome).toEqual({ kind: 'safe', atPost: 1, runnerId: 'carl' });
   }, 20000);
 
   it('rejects runDecision when no live ball, no active runner, or a malformed payload', async () => {
@@ -347,7 +347,7 @@ describe('MatchRoom', () => {
     // The 'playOutcome' broadcast reaches the client a moment after the
     // server-side state is already updated; give it one more tick to land.
     await room.waitForNextSimulationTick();
-    expect(outcome).toEqual({ kind: 'runOut', atPost: 1 });
+    expect(outcome).toEqual({ kind: 'runOut', atPost: 1, runnerId: 'carl' });
     expect(room.state.ballLive).toBe(false);
     expect(received).toEqual(outcome);
     // Fielders are reset back to their starting slots once the play ends.
@@ -563,7 +563,7 @@ describe('MatchRoom', () => {
 
     // The ball was held (gathered, then thrown) — this run-out is the throw's.
     expect([...holders]).toEqual(['kian']);
-    expect(outcome).toEqual({ kind: 'runOut', atPost: 1 });
+    expect(outcome).toEqual({ kind: 'runOut', atPost: 1, runnerId: 'carl' });
     expect(room.state.ballLive).toBe(false);
     expect(received).toEqual(outcome);
   }, 20000);

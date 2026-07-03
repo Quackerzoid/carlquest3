@@ -362,11 +362,13 @@ export class MatchRoom extends Room<MatchState> {
     if (fieldingEvent !== null && fieldingEvent.kind === 'caught') {
       return { kind: 'caught', by: fieldingEvent.by };
     }
+    const runner = this.running.runner();
     const runOutPost = this.checkRunOut(preExposed, crossedExposedPost);
     if (runOutPost !== null) {
-      return { kind: 'runOut', atPost: runOutPost };
+      // M4/M5: a single-runner room — the runner put out is always the sole
+      // live runner. Multi-runner attribution lands in Task 5.
+      return { kind: 'runOut', atPost: runOutPost, runnerId: runner?.id ?? '' };
     }
-    const runner = this.running.runner();
     if (runner !== null) {
       if (runner.home) return { kind: 'rounder' };
       if (atRestOrTimedOut) {
@@ -379,7 +381,7 @@ export class MatchRoom extends Room<MatchState> {
         // default that keeps atPost a valid number rather than undefined/NaN if
         // that invariant is ever changed.
         const atPost = runner.atPost ?? (runner.targetPost !== null ? runner.targetPost - 1 : 0);
-        return { kind: 'safe', atPost };
+        return { kind: 'safe', atPost, runnerId: runner.id };
       }
     }
     return null;
