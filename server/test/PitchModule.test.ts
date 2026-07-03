@@ -39,6 +39,18 @@ describe('resolvePitch', () => {
     }
   });
 
+  it('purely-vertical aim (zero horizontal component) is degenerate and falls back to default aim', () => {
+    for (const aim of [{ x: 0, y: 5, z: 0 }, { x: 0, y: -5, z: 0 }]) {
+      const p = resolvePitch(kian.stats, { aim, spinInput: 0 });
+      expect(Number.isFinite(p.velocity.x)).toBe(true);
+      expect(Number.isFinite(p.velocity.y)).toBe(true);
+      expect(Number.isFinite(p.velocity.z)).toBe(true);
+      // Bowling square is +z of the batting square, so a default pitch travels -z.
+      expect(p.velocity.z).toBeLessThan(0);
+      expect(len(p.velocity)).toBeCloseTo(26.4, 8);
+    }
+  });
+
   it('aim elevation is capped at PITCH_ELEVATION_MAX_DEG', () => {
     const p = resolvePitch(kian.stats, { aim: { x: 0, y: 5, z: -1 }, spinInput: 0 });
     const elevation = Math.asin(p.velocity.y / len(p.velocity)) * (180 / Math.PI);

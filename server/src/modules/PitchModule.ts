@@ -31,7 +31,10 @@ function defaultAim(): Vec3 {
 
 /** Normalise aim, capping elevation so pitches cannot be lobbed (player input is untrusted). */
 function normaliseAim(aim: Vec3, maxElevationDeg: number): Vec3 {
-  const usable = isFiniteVec(aim) && Math.hypot(aim.x, aim.y, aim.z) > 1e-9 ? aim : defaultAim();
+  const finiteNonZero = isFiniteVec(aim) && Math.hypot(aim.x, aim.y, aim.z) > 1e-9;
+  // A purely-vertical aim has zero horizontal component, which collapses the elevation
+  // cap and the final normalisation length below — treat it as degenerate too.
+  const usable = finiteNonZero && Math.hypot(aim.x, aim.z) > 1e-9 ? aim : defaultAim();
   const horizontal = Math.hypot(usable.x, usable.z);
   const maxY = horizontal * Math.tan(maxElevationDeg * DEG_TO_RAD);
   const cappedY = Math.min(usable.y, maxY);

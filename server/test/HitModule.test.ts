@@ -60,6 +60,30 @@ describe('resolveSwing', () => {
     }
   });
 
+  it('purely-vertical aim (zero horizontal component) is degenerate and falls back to default aim', () => {
+    const up = resolveSwing(carl.stats, { aim: { x: 0, y: 5, z: 0 }, spinInput: 0 }, 0);
+    const down = resolveSwing(carl.stats, { aim: { x: 0, y: -5, z: 0 }, spinInput: 0 }, 0);
+    expect(up.contact).toBe(true);
+    expect(down.contact).toBe(true);
+    if (up.contact && down.contact) {
+      expect(Number.isFinite(up.params.velocity.x)).toBe(true);
+      expect(Number.isFinite(up.params.velocity.y)).toBe(true);
+      expect(Number.isFinite(up.params.velocity.z)).toBe(true);
+      expect(Number.isFinite(down.params.velocity.x)).toBe(true);
+      expect(Number.isFinite(down.params.velocity.y)).toBe(true);
+      expect(Number.isFinite(down.params.velocity.z)).toBe(true);
+      expect(len(up.params.velocity)).toBeCloseTo(34, 8);
+      expect(len(down.params.velocity)).toBeCloseTo(34, 8);
+      // Same fallback as the zero-vector default aim case.
+      const fallback = resolveSwing(carl.stats, { aim: { x: 0, y: 0, z: 0 }, spinInput: 0 }, 0);
+      expect(fallback.contact).toBe(true);
+      if (fallback.contact) {
+        expect(up.params.velocity).toEqual(fallback.params.velocity);
+        expect(down.params.velocity).toEqual(fallback.params.velocity);
+      }
+    }
+  });
+
   it('spin follows spinInput sign and Carl spin 5 magnitude, clamped', () => {
     const r = resolveSwing(carl.stats, { aim: FLAT_AIM, spinInput: -3 }, 0);
     expect(r.contact).toBe(true);

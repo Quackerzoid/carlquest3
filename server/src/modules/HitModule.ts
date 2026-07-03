@@ -40,7 +40,10 @@ function GAMEFIELD_POST(i: number): { x: number; z: number } {
 
 /** Normalise aim, clamping elevation to the tunable hit range (user-approved M3 decision). */
 function normaliseAim(aim: Vec3): Vec3 {
-  const usable = isFiniteVec(aim) && Math.hypot(aim.x, aim.y, aim.z) > 1e-9 ? aim : defaultAim();
+  const finiteNonZero = isFiniteVec(aim) && Math.hypot(aim.x, aim.y, aim.z) > 1e-9;
+  // A purely-vertical aim has zero horizontal component, which collapses the elevation
+  // clamp and the final normalisation length below — treat it as degenerate too.
+  const usable = finiteNonZero && Math.hypot(aim.x, aim.z) > 1e-9 ? aim : defaultAim();
   const horizontal = Math.hypot(usable.x, usable.z);
   const minY = horizontal * Math.tan(GAME.HIT_ELEVATION_MIN_DEG * DEG_TO_RAD);
   const maxY = horizontal * Math.tan(GAME.HIT_ELEVATION_MAX_DEG * DEG_TO_RAD);
