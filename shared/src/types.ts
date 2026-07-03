@@ -38,3 +38,49 @@ export interface BallState {
   velocity: Vec3;
   angularVelocity: Vec3;
 }
+
+/** The nine 1-10 stats every character carries (spec §3). */
+export interface StatBlock {
+  speed: number;
+  reach: number;
+  power: number;
+  pitch: number;
+  spin: number;
+  stamina: number;
+  reflex: number;
+  instinct: number;
+  nerve: number;
+}
+
+/** The eleven ability identifiers (spec §3); behaviour lands in Milestone 9. */
+export type AbilityId =
+  | 'CLUTCH_SWING'
+  | 'CURVEBALL_MASTER'
+  | 'LONG_REACH'
+  | 'QUICK_DRAW'
+  | 'CANNON_ARM'
+  | 'SWITCH'
+  | 'IMMOVABLE'
+  | 'POWER_BASE'
+  | 'BUTTERFINGERS'
+  | 'POWERHOUSE'
+  | 'WALL';
+
+export interface Character {
+  id: string;
+  name: string;
+  stats: StatBlock;
+  ability: AbilityId;
+}
+
+/** Payload of the pitch message (spec §7): aim direction + sidespin scalar in [-1, 1]. */
+export interface PitchInput {
+  aim: Vec3;
+  spinInput: number;
+}
+
+/** Payload of the swing message (spec §7): aim direction + sidespin scalar in [-1, 1]. */
+export interface SwingInput {
+  aim: Vec3;
+  spinInput: number;
+}

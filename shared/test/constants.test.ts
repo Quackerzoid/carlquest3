@@ -46,6 +46,10 @@ describe('constants', () => {
     it('pins the ground collider thickness to 0.1 m', () => {
       expect(CONST.PHYSICS.GROUND_THICKNESS).toBe(0.1);
     });
+
+    it('pins the sim catch-up clamp to 0.25 s', () => {
+      expect(CONST.PHYSICS.SIM_MAX_CATCHUP).toBe(0.25);
+    });
   });
 
   describe('GAME — spec §8b', () => {
@@ -123,6 +127,21 @@ describe('constants', () => {
 
     it('pins bench stamina regeneration to 1 per play', () => {
       expect(CONST.GAME.BENCH_STAMINA_REGEN).toBe(1);
+    });
+
+    it('pins hit elevation clamp to -10..60 degrees', () => {
+      expect(CONST.GAME.HIT_ELEVATION_MIN_DEG).toBe(-10);
+      expect(CONST.GAME.HIT_ELEVATION_MAX_DEG).toBe(60);
+    });
+
+    it('pins pitch elevation cap to 20 degrees', () => {
+      expect(CONST.GAME.PITCH_ELEVATION_MAX_DEG).toBe(20);
+    });
+
+    it('pins demo play-end tunables', () => {
+      expect(CONST.GAME.PLAY_TIMEOUT_S).toBe(6);
+      expect(CONST.GAME.BALL_REST_SPEED).toBe(0.1);
+      expect(CONST.GAME.BALL_REST_TIME_S).toBe(1);
     });
   });
 

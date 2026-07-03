@@ -18,6 +18,8 @@ const PHYSICS = {
   GROUND_THICKNESS: 0.1,
   /** Default ball spawn height above the bowling square (M2 design decision). */
   BALL_RELEASE_HEIGHT: 1.0,
+  /** Max seconds of unsimulated time a single tick may consume (spiral-of-death clamp). */
+  SIM_MAX_CATCHUP: 0.25,
 } as const;
 
 const FIELD = {
@@ -62,6 +64,15 @@ const GAME = {
   INSTINCT_W: 0.4,
   REFLEX_W: 0.3,
   BENCH_STAMINA_REGEN: 1,
+  /** Hit launch elevation clamp, degrees (M3 design decision, user-approved aim-based launch). */
+  HIT_ELEVATION_MIN_DEG: -10,
+  HIT_ELEVATION_MAX_DEG: 60,
+  /** Pitch aim elevation cap, degrees (M3 design decision). */
+  PITCH_ELEVATION_MAX_DEG: 20,
+  /** Demo play ends after this long live, or when at rest (M3 design decisions). */
+  PLAY_TIMEOUT_S: 6,
+  BALL_REST_SPEED: 0.1,
+  BALL_REST_TIME_S: 1,
 } as const;
 
 function deepFreeze<T extends object>(obj: T): T {
