@@ -65,10 +65,10 @@ This section is the anti-hallucination ledger. It is the **only** trusted record
 
 ### 6.1 Current State (overwrite to reflect reality)
 
-- **Milestone:** 2 (PhysicsModule) — complete on branch, pending final branch review + merge + tag `m2-physics`. (M1 merged and tagged `m1-scaffold`.)
+- **Milestone:** 2 (PhysicsModule) — COMPLETE: final review passed (0 critical; 1 important doc item fixed pre-merge), merged to main, tagged `m2-physics`. (M1 = `m1-scaffold`.) Next: Milestone 3 (PitchModule + HitModule single-player loop) — carry the `step()` accumulator clamp from §6.4 into its plan.
 - **Modules implemented:** `/shared` (MatchPhase/MATCH_PHASES/Vec3 + PitchParams/HitParams/BallState; deep-frozen CONST.PHYSICS/FIELD/GAME); `/server` (Colyseus bootstrap, empty `MatchRoom`; **PhysicsModule**: Rapier world via async `createPhysicsModule()`, ground top at y=0, ball with CCD/mass 0.16/restitution 0.4 (Max combine rule), 4 posts + run-out sensors, fixed 1/60 accumulator stepping, Magnus `F = MAGNUS_K·(ω×v)` per substep, `spawnBall/applyPitch/applyHit/step/getBallState/isBallAtPost/dispose`); `/client` (Three.js scene, render-only). No pitch/hit/rules logic yet.
-- **Test status:** 57/57 passing (39 shared, 16 PhysicsModule incl. §9.2 Magnus acceptance + bounce/damping + exact-equality determinism, 2 room); `npm run check` green.
-- **Open worktrees/branches:** `.claude/worktrees/m2-physics` on `worktree-m2-physics` (to be merged + tagged). Not pushed to origin (awaiting user direction).
+- **Test status:** 57/57 passing (39 shared, 16 PhysicsModule incl. §9.2 Magnus acceptance + bounce/damping + exact-equality determinism, 2 room); `npm run check` green — re-verified on merged main (6cab295 = tag `m2-physics`).
+- **Open worktrees/branches:** none — milestone worktree and branch removed after merge. Not pushed to origin (awaiting user direction).
 
 ### 6.2 Decisions Record (append-only)
 
