@@ -80,7 +80,7 @@ client/src/SceneModule.ts    pitch, posts, batting/bowling squares, camera, ligh
     "eslint-config-prettier": "^9.1.0",
     "prettier": "^3.3.0",
     "typescript": "^5.5.0",
-    "typescript-eslint": "^7.13.0",
+    "typescript-eslint": "^8.0.0",
     "vitest": "^2.0.0"
   },
   "engines": { "node": ">=20" }
