@@ -4,7 +4,9 @@ import {
   getCharacter,
   moveSpeed,
   fatigueMult,
+  pCatch,
   pitchSpeed,
+  pressureMult,
   type BallState,
   type FielderSetup,
   type PitchParams,
@@ -378,5 +380,44 @@ describe('reset', () => {
       { id: 'carl', x: 1, z: 2, hasBall: false, stamina: carl.stats.stamina },
       { id: 'josh', x: 3, z: 4, hasBall: false, stamina: josh.stats.stamina },
     ]);
+  });
+});
+
+describe('pressure (M5)', () => {
+  // Carl: instinct 6, reflex 6, ball stationary (approachPenalty 0) → base pCatch 0.72.
+  // Carl nerve 8 → pressureMult(8) = 0.97 → pressured pCatch 0.6984.
+  const base = pCatch(carl.stats.instinct, carl.stats.reflex, 0);
+  const pressured = base * pressureMult(carl.stats.nerve);
+  // Strictly between the two thresholds: rng < base (catches without pressure)
+  // but rng >= pressured (misses with pressure) — the deterministic seam.
+  const rngValue = (base + pressured) / 2;
+
+  it('sanity: the chosen rng value sits strictly between pressured and base pCatch', () => {
+    expect(rngValue).toBeGreaterThan(pressured);
+    expect(rngValue).toBeLessThan(base);
+  });
+
+  it('without pressure the roll succeeds (catch)', () => {
+    const h = makeDeps([rngValue]);
+    const m = createFieldingModule([at(carl, 5, 5)], h.deps);
+    const event = m.tick(DT, ball(vec(5, PHYSICS.BALL_RELEASE_HEIGHT, 5)), true, null);
+    expect(event).toEqual({ kind: 'caught', by: 'carl' });
+  });
+
+  it('with pressure=true the same rng value now fails (pCatch scaled by pressureMult(nerve))', () => {
+    const h = makeDeps([rngValue]);
+    h.deps.pressure = () => true;
+    const m = createFieldingModule([at(carl, 5, 5)], h.deps);
+    const event = m.tick(DT, ball(vec(5, PHYSICS.BALL_RELEASE_HEIGHT, 5)), true, null);
+    expect(event).toBeNull();
+    expect(m.holderId()).toBeNull();
+  });
+
+  it('omitting pressure entirely (no deps.pressure key) behaves exactly like pressure absent', () => {
+    const h = makeDeps([rngValue]);
+    expect(h.deps.pressure).toBeUndefined();
+    const m = createFieldingModule([at(carl, 5, 5)], h.deps);
+    const event = m.tick(DT, ball(vec(5, PHYSICS.BALL_RELEASE_HEIGHT, 5)), true, null);
+    expect(event).toEqual({ kind: 'caught', by: 'carl' });
   });
 });

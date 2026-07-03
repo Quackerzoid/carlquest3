@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONST, exitVelocity, getCharacter, timingWindow } from '@carlquest/shared';
+import { CONST, exitVelocity, getCharacter, pressureMult, timingWindow } from '@carlquest/shared';
 import { resolveSwing } from '../src/modules/HitModule';
 
 const carl = getCharacter('carl');
@@ -101,5 +101,44 @@ describe('resolveSwing', () => {
     const input = { aim: { x: 1, y: 0.5, z: 1 }, spinInput: 0.3 };
     expect(resolveSwing(carl.stats, input, 0.02)).toEqual(resolveSwing(carl.stats, input, 0.02));
     expect(input.aim).toEqual({ x: 1, y: 0.5, z: 1 });
+  });
+
+  describe('pressure (M5)', () => {
+    it('pressure=true scales exit velocity by exactly pressureMult(nerve) — Carl nerve 8', () => {
+      const withoutPressure = resolveSwing(carl.stats, { aim: FLAT_AIM, spinInput: 0 }, 0);
+      const withPressure = resolveSwing(carl.stats, { aim: FLAT_AIM, spinInput: 0 }, 0, 1, true);
+      expect(withoutPressure.contact).toBe(true);
+      expect(withPressure.contact).toBe(true);
+      if (withoutPressure.contact && withPressure.contact) {
+        const factor = pressureMult(carl.stats.nerve);
+        expect(len(withPressure.params.velocity)).toBeCloseTo(
+          len(withoutPressure.params.velocity) * factor,
+          8,
+        );
+        expect(withPressure.timingFactor).toBeCloseTo(withoutPressure.timingFactor * factor, 8);
+      }
+    });
+
+    it('pressure=true scales exit velocity by exactly pressureMult(nerve) — Joe nerve 2', () => {
+      const joe = getCharacter('joe');
+      const withoutPressure = resolveSwing(joe.stats, { aim: FLAT_AIM, spinInput: 0 }, 0);
+      const withPressure = resolveSwing(joe.stats, { aim: FLAT_AIM, spinInput: 0 }, 0, 1, true);
+      expect(withoutPressure.contact).toBe(true);
+      expect(withPressure.contact).toBe(true);
+      if (withoutPressure.contact && withPressure.contact) {
+        const factor = pressureMult(joe.stats.nerve);
+        expect(len(withPressure.params.velocity)).toBeCloseTo(
+          len(withoutPressure.params.velocity) * factor,
+          8,
+        );
+        expect(withPressure.timingFactor).toBeCloseTo(withoutPressure.timingFactor * factor, 8);
+      }
+    });
+
+    it('pressure defaults to false — omitting the param is byte-identical to passing false', () => {
+      const omitted = resolveSwing(carl.stats, { aim: FLAT_AIM, spinInput: 0 }, 0);
+      const explicitFalse = resolveSwing(carl.stats, { aim: FLAT_AIM, spinInput: 0 }, 0, 1, false);
+      expect(omitted).toEqual(explicitFalse);
+    });
   });
 });

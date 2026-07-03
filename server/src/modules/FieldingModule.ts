@@ -13,6 +13,7 @@ import {
   moveSpeed,
   pCatch,
   pitchSpeed,
+  pressureMult,
   type BallState,
   type Character,
   type FielderSetup,
@@ -66,6 +67,12 @@ export interface FieldingDeps {
   applyThrow: (params: PitchParams) => void;
   /** Parks the held ball at rest; the room binds physics.spawnBall. */
   holdBallAt: (pos: Vec3) => void;
+  /**
+   * True when RulesModule flags a high-pressure state (Milestone 5, spec §5);
+   * absent (default) means no pressure is ever applied. Read once per catch
+   * roll — same seam as the rng call it scales.
+   */
+  pressure?: () => boolean;
 }
 
 export type FieldingEvent =
@@ -277,7 +284,8 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
           }
           if (f.latched) continue; // already rolled this entry
           f.latched = true;
-          const p = pCatch(f.character.stats.instinct, f.character.stats.reflex, penalty);
+          let p = pCatch(f.character.stats.instinct, f.character.stats.reflex, penalty);
+          if (deps.pressure?.()) p *= pressureMult(f.character.stats.nerve);
           // NEUTRAL.guaranteed short-circuits the roll when abilities land (M9);
           // false today, so exactly one rng draw happens per radius entry.
           const success = NEUTRAL.guaranteed || deps.rng() < p;

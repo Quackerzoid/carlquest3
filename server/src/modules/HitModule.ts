@@ -6,6 +6,7 @@ import {
   CONST,
   exitVelocity,
   hitSpin,
+  pressureMult,
   timingFactor,
   timingWindow,
   type HitParams,
@@ -57,12 +58,14 @@ export function resolveSwing(
   input: SwingInput,
   timingError: number,
   windowMult = 1, // CANNON_ARM shrinks the batter's window in Milestone 9
+  pressure = false, // RulesModule flags high-pressure states (Milestone 5, spec §5)
 ): SwingResult {
   const window = timingWindow(stats.reflex, windowMult);
-  const timing = timingFactor(timingError, window);
+  let timing = timingFactor(timingError, window);
   // NaN-safe: a degenerate window (e.g. windowMult 0) can make timingFactor NaN.
   // `!(timing > 0)` catches both `timing <= 0` and `NaN`, resolving to a miss either way.
   if (!(timing > 0)) return { contact: false };
+  if (pressure) timing *= pressureMult(stats.nerve);
 
   const direction = normaliseAim(input.aim);
   const speed = exitVelocity(stats.power, timing);
