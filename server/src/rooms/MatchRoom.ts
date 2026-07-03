@@ -9,7 +9,6 @@ import {
   type PlayOutcome,
   type RunDecisionInput,
   type SwingInput,
-  type Vec3,
 } from '@carlquest/shared';
 import { createPhysicsModule, type PhysicsModule } from '../modules/PhysicsModule';
 import { resolvePitch } from '../modules/PitchModule';
@@ -86,16 +85,6 @@ export class MatchRoom extends Room<MatchState> {
   private swung = false;
   private liveSince = 0;
   private restSince: number | null = null;
-  /**
-   * This tick's ball travel, start to end. `physics.isBallAtPost` is a single
-   * end-of-tick pose poll (§6.4 known issue); under a real event loop, a
-   * stalled callback can let `physics.step` catch up several tenths of a
-   * second in one call, and a fast ball can cross a post's sensor entirely
-   * between the previous poll and this one. `checkRunOut` below sweeps this
-   * segment as a fallback so a fly-through run-out is not lost to scheduling
-   * jitter — same intent as the sensor check, robust to how coarsely dt lands.
-   */
-  private lastBallSweep: { from: Vec3; to: Vec3 } | null = null;
 
   override async onCreate(options: MatchRoomOptions = {}): Promise<void> {
     this.setState(new MatchState());
@@ -223,7 +212,6 @@ export class MatchRoom extends Room<MatchState> {
       this.crossed = true;
       this.contactTime = this.simTime;
     }
-    this.lastBallSweep = { from: beforePos, to: state.position };
 
     this.state.ball.x = state.position.x;
     this.state.ball.y = state.position.y;
@@ -277,13 +265,17 @@ export class MatchRoom extends Room<MatchState> {
     return timedOut || atRest;
   }
 
-  /** Run-out sensor per plan: physics post sensor OR the ball's holder standing within range of the exposed post. */
+  /**
+   * Run-out per plan: the ball has touched the exposed post's run-out sensor at
+   * any point this play segment (event-accurate via physics.wasBallAtPost —
+   * latched per substep, so a fast fly-through between ticks is never lost, per
+   * CLAUDE.md §6.4) OR the ball's current holder is standing within range of it.
+   */
   private checkRunOut(): number | null {
     const exposed = this.running.exposedPost();
     if (exposed === null) return null;
     const postIndex = exposed - 1; // physics posts are 0-based; posts 1-4 in the running/schema domain
-    if (this.physics.isBallAtPost(postIndex)) return exposed;
-    if (this.lastBallSweep !== null && this.sweptPost(this.lastBallSweep, postIndex)) return exposed;
+    if (this.physics.wasBallAtPost(postIndex)) return exposed;
     const holderId = this.fielding.holderId();
     if (holderId === null) return null;
     const holder = this.fielding.getFielders().find((f) => f.id === holderId);
@@ -292,30 +284,6 @@ export class MatchRoom extends Room<MatchState> {
     if (post === undefined) return null;
     const distance = Math.hypot(holder.x - post.x, holder.z - post.z);
     return distance <= FIELD.POST_SENSOR_RADIUS ? exposed : null;
-  }
-
-  /**
-   * True if this tick's ball travel (a straight-line approximation of the
-   * physics substeps folded into it) passed within the post's run-out sensor.
-   * Fallback for `physics.isBallAtPost` missing a fast fly-through between
-   * discrete polls (see `lastBallSweep`).
-   */
-  private sweptPost(sweep: { from: Vec3; to: Vec3 }, postIndex: number): boolean {
-    const post = FIELD.POSTS[postIndex];
-    if (post === undefined) return false;
-    const dx = sweep.to.x - sweep.from.x;
-    const dz = sweep.to.z - sweep.from.z;
-    const lengthSq = dx * dx + dz * dz;
-    const t =
-      lengthSq < 1e-9
-        ? 0
-        : Math.max(0, Math.min(1, ((post.x - sweep.from.x) * dx + (post.z - sweep.from.z) * dz) / lengthSq));
-    const closestX = sweep.from.x + dx * t;
-    const closestZ = sweep.from.z + dz * t;
-    const closestY = sweep.from.y + (sweep.to.y - sweep.from.y) * t;
-    const radial = Math.hypot(closestX - post.x, closestZ - post.z);
-    const capture = FIELD.POST_SENSOR_RADIUS + PHYSICS.BALL_RADIUS;
-    return radial <= capture && closestY >= 0 && closestY <= FIELD.POST_HEIGHT;
   }
 
   /** First-outcome-wins resolution, in plan priority order: caught, runOut, rounder, safe. */
@@ -332,6 +300,13 @@ export class MatchRoom extends Room<MatchState> {
       if (runner.home) return { kind: 'rounder' };
       if (atRestOrTimedOut) {
         // Mid-segment at play end = safe at the previous post (M4 simplification, logged in CLAUDE.md §6.2).
+        // A live, non-home runner always has EITHER targetPost (mid-segment) OR
+        // atPost (halted) non-null — RunningModule never leaves both null while
+        // running (startRun sets targetPost; arrival sets one or the other), and
+        // the only null/null state is `out`, which is resolved as a run-out
+        // above. So the final `: 0` branch is unreachable; it is a defensive
+        // default that keeps atPost a valid number rather than undefined/NaN if
+        // that invariant is ever changed.
         const atPost = runner.atPost ?? (runner.targetPost !== null ? runner.targetPost - 1 : 0);
         return { kind: 'safe', atPost };
       }
@@ -348,7 +323,6 @@ export class MatchRoom extends Room<MatchState> {
     this.fielding.reset();
     this.running.reset();
     this.restSince = null;
-    this.lastBallSweep = null;
   }
 
   private syncFielders(): void {

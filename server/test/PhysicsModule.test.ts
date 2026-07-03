@@ -224,6 +224,73 @@ describe('PhysicsModule', () => {
     });
   });
 
+  describe('post-crossing events (event-accurate run-out, CLAUDE.md §6.4)', () => {
+    // The room polls isBallAtPost once per tick, but a tick can fold several
+    // fixed substeps into one physics.step(dt). A ball can enter and leave a
+    // post's ~0.5 m sensor entirely within those substeps, so the end-of-tick
+    // pose the poll sees is already past it. Event-accurate wasBallAtPost drains
+    // the intersection events every substep, so the crossing is not lost.
+    const post0 = CONST.FIELD.POSTS[0];
+    if (post0 === undefined) throw new Error('spec guarantees four posts');
+    const postY = CONST.FIELD.POST_HEIGHT / 2;
+
+    it('wasBallAtPost latches a crossing the once-per-tick pose poll would miss', () => {
+      // Fire the ball through post 0 horizontally at 20 m/s (≈0.33 m/substep, so
+      // several substep poses fall inside the 1 m-wide sensor), then advance the
+      // whole transit in a SINGLE step call so the final pose is well past it.
+      physics.applyPitch({
+        origin: { x: post0.x - 2, y: postY, z: post0.z },
+        velocity: { x: 20, y: 0, z: 0 },
+        angularVelocity: { x: 0, y: 0, z: 0 },
+      });
+      physics.step(0.2); // 12 substeps in one call: enters and exits mid-step
+      expect(physics.isBallAtPost(0)).toBe(false); // end-of-tick pose has left the sensor
+      expect(physics.wasBallAtPost(0)).toBe(true); // but the event was captured
+      expect(physics.wasBallAtPost(1)).toBe(false); // an unrelated post never fires
+    });
+
+    it('wasBallAtPost stays false for a ball that never approaches a post', () => {
+      physics.applyPitch({
+        origin: { x: CONST.FIELD.BOWLING_SQUARE.x, y: 1, z: CONST.FIELD.BOWLING_SQUARE.z },
+        velocity: { x: 0, y: 0, z: -20 }, // straight down the pitch, away from every post
+        angularVelocity: { x: 0, y: 0, z: 0 },
+      });
+      physics.step(0.3);
+      for (let i = 0; i < CONST.FIELD.POSTS.length; i += 1) {
+        expect(physics.wasBallAtPost(i)).toBe(false);
+      }
+    });
+
+    it('the crossing latch resets on spawnBall, applyPitch and applyHit', () => {
+      const cross = (): void => {
+        physics.applyPitch({
+          origin: { x: post0.x - 2, y: postY, z: post0.z },
+          velocity: { x: 20, y: 0, z: 0 },
+          angularVelocity: { x: 0, y: 0, z: 0 },
+        });
+        physics.step(0.2);
+        expect(physics.wasBallAtPost(0)).toBe(true);
+      };
+
+      cross();
+      physics.spawnBall();
+      expect(physics.wasBallAtPost(0)).toBe(false);
+
+      cross();
+      physics.applyPitch({ velocity: { x: 0, y: 0, z: -10 }, angularVelocity: { x: 0, y: 0, z: 0 } });
+      expect(physics.wasBallAtPost(0)).toBe(false);
+
+      cross();
+      physics.applyHit({ velocity: { x: 0, y: 8, z: 15 }, angularVelocity: { x: 0, y: 0, z: 0 } });
+      expect(physics.wasBallAtPost(0)).toBe(false);
+    });
+
+    it('throws RangeError for an out-of-range post index', () => {
+      expect(() => physics.wasBallAtPost(4)).toThrow(RangeError);
+      expect(() => physics.wasBallAtPost(-1)).toThrow(RangeError);
+    });
+  });
+
   describe('bounce tracking (spec §8 caught-before-bounce)', () => {
     it('hasBounced is false after spawnBall and while a pitch is airborne', () => {
       physics.spawnBall();

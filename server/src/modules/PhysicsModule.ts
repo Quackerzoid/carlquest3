@@ -15,6 +15,13 @@ export interface PhysicsModule {
   getBallState(): BallState;
   /** True while the ball intersects the run-out sensor of the given post (0-3). */
   isBallAtPost(postIndex: number): boolean;
+  /**
+   * True iff the ball has intersected the given post's run-out sensor at ANY
+   * point since the last spawn/pitch/hit. Event-accurate (drained per substep),
+   * so it catches an intra-tick fly-through that the once-per-tick isBallAtPost
+   * pose poll would miss — see CLAUDE.md §6.4.
+   */
+  wasBallAtPost(postIndex: number): boolean;
   /** True iff the ball has contacted the ground since the last spawn/pitch/hit. */
   hasBounced(): boolean;
   /** Upserts a fixed capsule obstacle; an existing id is repositioned, never duplicated. */
@@ -64,8 +71,11 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
     ballBody,
   );
 
-  // Posts: fixed cylinder + co-located run-out sensor per post.
-  const postSensors: RAPIER.Collider[] = FIELD.POSTS.map((post) => {
+  // Posts: fixed cylinder + co-located run-out sensor per post. Each sensor's
+  // collider handle maps back to its post index so drained intersection events
+  // can be attributed to the right post (event-accurate run-out, see step()).
+  const postSensorIndexByHandle = new Map<number, number>();
+  const postSensors: RAPIER.Collider[] = FIELD.POSTS.map((post, index) => {
     const body = world.createRigidBody(
       RAPIER.RigidBodyDesc.fixed().setTranslation(post.x, FIELD.POST_HEIGHT / 2, post.z),
     );
@@ -73,10 +83,18 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
       RAPIER.ColliderDesc.cylinder(FIELD.POST_HEIGHT / 2, FIELD.POST_RADIUS),
       body,
     );
-    return world.createCollider(
-      RAPIER.ColliderDesc.cylinder(FIELD.POST_HEIGHT / 2, FIELD.POST_SENSOR_RADIUS).setSensor(true),
+    const sensor = world.createCollider(
+      RAPIER.ColliderDesc.cylinder(FIELD.POST_HEIGHT / 2, FIELD.POST_SENSOR_RADIUS)
+        .setSensor(true)
+        // Emit intersection started/stopped events so a fast fly-through that
+        // clears the sensor between two once-per-tick polls is still captured.
+        // The ball already flags COLLISION_EVENTS; setting it here too is
+        // belt-and-braces and purely observational (no solver effect).
+        .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
       body,
     );
+    postSensorIndexByHandle.set(sensor.handle, index);
+    return sensor;
   });
 
   // Blockers: fixed capsule obstacles keyed by caller id (spec §6, The Whale —
@@ -89,6 +107,9 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
   // Drained every substep; `true` = auto-clear drained events.
   const eventQueue = new RAPIER.EventQueue(true);
   let bounced = false;
+  // Post indices whose run-out sensor the ball has entered since the last
+  // spawn/pitch/hit — latched from intersection events (see step()).
+  const postsCrossed = new Set<number>();
 
   let accumulator = 0;
 
@@ -99,6 +120,7 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
     ballBody.resetForces(true);
     ballBody.resetTorques(true);
     bounced = false; // fresh flight — ground-contact tracking restarts
+    postsCrossed.clear(); // and post-crossing tracking restarts for this segment
     // Deliberate: re-anchor the substep phase to the spawn/pitch event, discarding
     // any sub-timestep remainder (<1/60 s) so trajectories are independent of when
     // the triggering message landed within a frame. The accumulator is WORLD time —
@@ -144,9 +166,11 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
     applyHit(params: HitParams): void {
       ballBody.setLinvel(params.velocity, true);
       ballBody.setAngvel(params.angularVelocity, true);
-      // A hit keeps the ball's position (no placeBall), so restart bounce
-      // tracking here explicitly: caught-before-bounce is per flight.
+      // A hit keeps the ball's position (no placeBall), so restart bounce and
+      // post-crossing tracking here explicitly: both are per play segment, and
+      // a hit (like a throw via applyPitch) begins a fresh run-out window.
       bounced = false;
+      postsCrossed.clear();
     },
 
     step(dtSeconds: number): void {
@@ -166,7 +190,15 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
           const ground = groundCollider.handle;
           if ((handle1 === ball && handle2 === ground) || (handle1 === ground && handle2 === ball)) {
             bounced = true;
+            return;
           }
+          // Post-sensor intersection: exactly one handle is the ball, the other
+          // a post sensor. Latch the post so a mid-tick fly-through registers
+          // even though the end-of-tick isBallAtPost poll has already moved on.
+          const other = handle1 === ball ? handle2 : handle2 === ball ? handle1 : null;
+          if (other === null) return;
+          const postIndex = postSensorIndexByHandle.get(other);
+          if (postIndex !== undefined) postsCrossed.add(postIndex);
         });
         accumulator -= PHYSICS.FIXED_TIMESTEP;
       }
@@ -189,6 +221,13 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
         throw new RangeError(`postIndex ${postIndex} out of range 0-${postSensors.length - 1}`);
       }
       return world.intersectionPair(sensor, ballCollider);
+    },
+
+    wasBallAtPost(postIndex: number): boolean {
+      if (postIndex < 0 || postIndex >= postSensors.length) {
+        throw new RangeError(`postIndex ${postIndex} out of range 0-${postSensors.length - 1}`);
+      }
+      return postsCrossed.has(postIndex);
     },
 
     hasBounced(): boolean {

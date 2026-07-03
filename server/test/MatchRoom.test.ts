@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { boot, ColyseusTestServer } from '@colyseus/testing';
 import type { Room } from '@colyseus/core';
 import type { Room as ClientRoom } from 'colyseus.js';
-import { CONST, type PlayOutcome } from '@carlquest/shared';
+import { CHARACTERS, CONST, type PlayOutcome } from '@carlquest/shared';
 import appConfig from '../src/app.config';
 import { MatchState } from '../src/rooms/MatchState';
 
@@ -13,8 +13,14 @@ type TestClient = ClientRoom<MatchState>;
 
 const { FIELD } = CONST;
 
-/** The demo fielding side, in FIELDING_POSITIONS slot order (kept in sync with MatchRoom.ts). */
-const FIELDING_IDS = ['kian', 'laurie', 'josh', 'joel', 'darcy', 'jonty', 'robbie', 'joe', 'ricy'];
+/**
+ * The demo fielding side, derived from the shared roster exactly as MatchRoom
+ * builds it (every non-Carl entry, in table order, up to the number of fielding
+ * slots) so this expectation cannot drift from the room's own selection.
+ */
+const FIELDING_IDS = CHARACTERS.filter((c) => c.id !== 'carl')
+  .slice(0, FIELD.FIELDING_POSITIONS.length)
+  .map((c) => c.id);
 
 /** rng() that always misses every real roster's pCatch (mirrors FieldingModule.test.ts convention). */
 const ALWAYS_MISS = (): number => 0.999;
@@ -126,7 +132,16 @@ describe('MatchRoom', () => {
     client.send('swing', null);
     await room.waitForNextSimulationTick();
     client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-    await room.waitForNextSimulationTick();
+    // The pitch handler sets ballLive immediately, but the ball's velocity is
+    // only written into the schema by the *following* tick(). Because
+    // waitForNextSimulationTick is a fixed timer rather than a real per-tick
+    // barrier, a single wait can occasionally return before that tick has run,
+    // leaving the schema velocity at its stale zero. Poll until the stepped
+    // velocity actually lands so this asserts the pitch's real speed, not a race.
+    for (let i = 0; i < 30; i += 1) {
+      await room.waitForNextSimulationTick();
+      if (room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0) break;
+    }
     await client.waitForNextPatch();
     expect(client.state.ballLive).toBe(true);
     const speed = Math.hypot(client.state.ball.vx, client.state.ball.vy, client.state.ball.vz);
@@ -157,6 +172,29 @@ describe('MatchRoom', () => {
     expect(speed).toBeGreaterThan(10);
   }, 15000);
 
+  /**
+   * Poll until the pitched ball is genuinely near the batting-square plane.
+   *
+   * `waitForNextSimulationTick` is a fixed setTimeout, not a real barrier on the
+   * room's own tick (see @colyseus/testing's Room.ext.js), and `ball.z` defaults
+   * to 0 — a false "near the plane" reading — between the tick that sets
+   * `ballLive` (in the pitch handler) and the *next* tick that first writes the
+   * ball's real position into the schema. So requiring `ballLive && ball.z < 0.5`
+   * alone can fire on iteration 0 while the ball is still stale at z = 0, making
+   * the caller swing far too early (a guaranteed miss). Latch on having first
+   * seen the ball genuinely in flight (z well past the plane) before accepting a
+   * near-plane reading, which eliminates that early-swing false positive.
+   */
+  async function waitNearPlane(room: TestRoom): Promise<void> {
+    let sawInFlight = false;
+    for (let i = 0; i < 120; i += 1) {
+      await room.waitForNextSimulationTick();
+      if (!room.state.ballLive) continue;
+      if (room.state.ball.z > 1) sawInFlight = true; // real, stepped position (pitch starts at z ≈ 7.5)
+      if (sawInFlight && room.state.ball.z < 0.5) break;
+    }
+  }
+
   /** Pitch straight, poll until the ball nears the batting plane, then swing with the given aim/spin. */
   async function pitchThenSwing(
     room: TestRoom,
@@ -164,15 +202,7 @@ describe('MatchRoom', () => {
     aim: { x: number; y: number; z: number },
   ): Promise<void> {
     client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-    for (let i = 0; i < 60; i += 1) {
-      await room.waitForNextSimulationTick();
-      // `waitForNextSimulationTick` is a fixed setTimeout, not a real barrier
-      // on the room's own tick (see @colyseus/testing's Room.ext.js), and
-      // `ball.z` defaults to 0 (a false "near the plane" reading) before the
-      // very first tick applies the pitch — so this must also require
-      // `ballLive`, or a slow first tick can make this fire on iteration 0.
-      if (room.state.ballLive && room.state.ball.z < 0.5) break;
-    }
+    await waitNearPlane(room);
     client.send('swing', { timing: 0, aim, spinInput: 0 });
     await room.waitForNextSimulationTick();
   }
@@ -197,21 +227,22 @@ describe('MatchRoom', () => {
     lateTicks: number,
   ): Promise<void> {
     client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-    for (let i = 0; i < 60; i += 1) {
-      await room.waitForNextSimulationTick();
-      // `waitForNextSimulationTick` is a fixed setTimeout, not a real barrier
-      // on the room's own tick (see @colyseus/testing's Room.ext.js), and
-      // `ball.z` defaults to 0 (a false "near the plane" reading) before the
-      // very first tick applies the pitch — so this must also require
-      // `ballLive`, or a slow first tick can make this fire on iteration 0.
-      if (room.state.ballLive && room.state.ball.z < 0.5) break;
-    }
+    await waitNearPlane(room);
     for (let i = 0; i < lateTicks; i += 1) {
       await room.waitForNextSimulationTick();
     }
-    const dx = target.x - room.state.ball.x;
-    const dz = target.z - room.state.ball.z;
-    client.send('swing', { timing: 0, aim: { x: dx, y: 0, z: dz }, spinInput: 0 });
+    // The swing is applied at the ball's position roughly one tick AFTER we read
+    // it here (the message lands on the next room tick), by which point the ball
+    // has drifted ≈ v·dt further down the -z pitch line. Aiming from the raw read
+    // position therefore launches the hit off a parallel line, missing the post
+    // by the perpendicular component of that drift (≈0.4 m — right at the 0.5 m
+    // sensor edge). Aim from the predicted one-tick-ahead contact point instead,
+    // which cancels the bulk of that offset. (Residual sub-tick jitter is what
+    // the small retry in the caller absorbs.)
+    const dt = CONST.PHYSICS.FIXED_TIMESTEP;
+    const cx = room.state.ball.x + room.state.ball.vx * dt;
+    const cz = room.state.ball.z + room.state.ball.vz * dt;
+    client.send('swing', { timing: 0, aim: { x: target.x - cx, y: 0, z: target.z - cz }, spinInput: 0 });
     await room.waitForNextSimulationTick();
   }
 
@@ -281,66 +312,61 @@ describe('MatchRoom', () => {
     expect(room.state.ballLive).toBe(false);
   });
 
-  it('a hit flown directly at an exposed post is a run-out (ball-at-post sensor)', async () => {
+  it('a hit flown directly at an exposed post is a run-out (event-accurate sensor)', async () => {
     const post1 = FIELD.POSTS[0];
     if (post1 === undefined) throw new Error('no post 1 in fixture');
 
-    // `physics.isBallAtPost` is a discrete end-of-tick pose poll (CLAUDE.md
-    // §6.4 known issue) and `waitForNextSimulationTick` is a fixed timer, not
-    // a real per-tick barrier (@colyseus/testing's Room.ext.js) — so exactly
-    // where a fast ball's finitely-many sampled positions land relative to
-    // the post's ~0.5 m sensor has some real-timing jitter. The aim itself is
-    // exact (computed from the ball's actual position, not an assumed
-    // contact point), so a retry with a fresh room resolves the rare miss
-    // rather than the test asserting on a single unlucky sample.
-    const isPost1RunOut = (o: PlayOutcome | null): boolean => o?.kind === 'runOut' && o.atPost === 1;
-    let outcome: PlayOutcome | null = null;
+    // Detection is now event-accurate: physics.wasBallAtPost latches the sensor
+    // intersection per substep (CLAUDE.md §6.4), so the crossing cannot be lost
+    // between the room's once-per-tick polls even when `waitForNextSimulationTick`'s
+    // fixed timer lets a tick fold several substeps together. No retry needed —
+    // a single deterministic attempt asserts the outcome directly.
+    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
+    const client = await colyseus.connectTo(room);
     let received: PlayOutcome | null = null;
-    for (let attempt = 0; attempt < 4 && !isPost1RunOut(outcome); attempt += 1) {
-      const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-      const client = await colyseus.connectTo(room);
-      received = null;
-      client.onMessage('playOutcome', (payload: PlayOutcome) => {
-        received = payload;
-      });
+    client.onMessage('playOutcome', (payload: PlayOutcome) => {
+      received = payload;
+    });
 
-      // Aim the hit straight down the line to post 1 (11.7 m away at ~34
-      // m/s): the ball reaches the post's run-out sensor long before Carl
-      // (6.35 m/s) can cover the same distance on foot, so the runner is
-      // still mid-segment.
-      await pitchThenSwingAtTarget(room, client, post1, 0);
+    // Aim the hit straight down the line to post 1 (11.7 m away at ~34 m/s): the
+    // ball reaches the post's run-out sensor long before Carl (6.35 m/s) can
+    // cover the same distance on foot, so the runner is still mid-segment.
+    await pitchThenSwingAtTarget(room, client, post1, 0);
 
-      outcome = null;
-      for (let i = 0; i < 90 && outcome === null; i += 1) {
-        await room.waitForNextSimulationTick();
-        if (!room.state.ballLive) outcome = JSON.parse(room.state.lastOutcome) as PlayOutcome;
-      }
-      // The 'playOutcome' broadcast reaches the client a moment after the
-      // server-side state is already updated; give it one more tick to land.
+    let outcome: PlayOutcome | null = null;
+    for (let i = 0; i < 120 && outcome === null; i += 1) {
       await room.waitForNextSimulationTick();
-
-      if (isPost1RunOut(outcome)) {
-        expect(room.state.ballLive).toBe(false);
-        expect(received).toEqual(outcome);
-        // Fielders are reset back to their starting slots once the play ends.
-        const bowler = room.state.fielders.get('kian');
-        expect(bowler?.x).toBeCloseTo(FIELD.BOWLING_SQUARE.x, 9);
-        expect(bowler?.z).toBeCloseTo(FIELD.BOWLING_SQUARE.z, 9);
-      }
+      if (!room.state.ballLive) outcome = JSON.parse(room.state.lastOutcome) as PlayOutcome;
     }
-
+    // The 'playOutcome' broadcast reaches the client a moment after the
+    // server-side state is already updated; give it one more tick to land.
+    await room.waitForNextSimulationTick();
     expect(outcome).toEqual({ kind: 'runOut', atPost: 1 });
+    expect(room.state.ballLive).toBe(false);
+    expect(received).toEqual(outcome);
+    // Fielders are reset back to their starting slots once the play ends.
+    const bowler = room.state.fielders.get('kian');
+    expect(bowler?.x).toBeCloseTo(FIELD.BOWLING_SQUARE.x, 9);
+    expect(bowler?.z).toBeCloseTo(FIELD.BOWLING_SQUARE.z, 9);
   }, 20000);
 
   it('a hit flown straight at the bowler is caught (pre-bounce)', async () => {
-    // Same real-timing sample jitter as the run-out test above — retry with
-    // a fresh room rather than assert on a single unlucky sample. A near
-    // miss can occasionally land in a neighbouring fielder's radius instead
-    // of Kian's, so that also triggers a retry rather than a false failure.
+    // Aimed straight back down the pitch line at Kian (the bowler, slot 0) with a
+    // guaranteed-catch rng, so a fielder catches pre-bounce and the play resolves
+    // `caught`. This is the ONE test that keeps a minimal retry, and it is not
+    // about detection: outcome resolution and the pre-bounce catch are exercised
+    // every attempt. The residual nondeterminism is purely WHICH fielder is
+    // nearest the ball at the contact tick — `waitForNextSimulationTick` is a
+    // fixed timer, not a per-tick barrier (@colyseus/testing's Room.ext.js), so a
+    // swing that lands a sub-tick late puts contact slightly behind the plane,
+    // occasionally inside the long-reach backstop (Laurie)'s radius before Kian's.
+    // A fresh-room retry re-samples that message-landing jitter; the run-out test
+    // above needs no retry because event-accurate wasBallAtPost removed the only
+    // detection-side flake.
     const isKianCatch = (o: PlayOutcome | null): boolean => o?.kind === 'caught' && o.by === 'kian';
     let outcome: PlayOutcome | null = null;
     let received: PlayOutcome | null = null;
-    for (let attempt = 0; attempt < 4 && !isKianCatch(outcome); attempt += 1) {
+    for (let attempt = 0; attempt < 3 && !isKianCatch(outcome); attempt += 1) {
       const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
       const client = await colyseus.connectTo(room);
       received = null;
@@ -348,9 +374,6 @@ describe('MatchRoom', () => {
         received = payload;
       });
 
-      // Straight back down the pitch line at Kian (the bowler, slot 0) — he
-      // never has to move, so the guaranteed-catch rng resolves the very
-      // first tick the ball enters his catch radius, well before it can bounce.
       await pitchThenSwingAtTarget(room, client, FIELD.BOWLING_SQUARE, 0);
 
       outcome = null;
