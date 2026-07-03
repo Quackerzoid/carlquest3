@@ -14,7 +14,7 @@ import { createPhysicsModule, type PhysicsModule } from '../modules/PhysicsModul
 import { resolvePitch } from '../modules/PitchModule';
 import { resolveSwing } from '../modules/HitModule';
 import { createFieldingModule, type FieldingEvent, type FieldingModule } from '../modules/FieldingModule';
-import { createRunningModule } from '../modules/RunningModule';
+import { createRunningModule, type RunnerView } from '../modules/RunningModule';
 import { FielderSchema, MatchState } from './MatchState';
 
 const { PHYSICS, GAME, FIELD } = CONST;
@@ -154,6 +154,19 @@ export class MatchRoom extends Room<MatchState> {
     console.error(`[MatchRoom] uncaught exception in ${methodName}:`, error);
   }
 
+  /**
+   * M5 Task 2 shim: the room still drives a single runner until Task 5's
+   * multi-runner wiring lands, so it reads the first (only) runner and the first
+   * exposure from the list API that replaced M4's runner()/exposedPost().
+   */
+  private firstRunner(): RunnerView | null {
+    return this.running.runners()[0] ?? null;
+  }
+
+  private firstExposedPost(): number | null {
+    return this.running.exposures()[0]?.post ?? null;
+  }
+
   private handlePitch(_client: Client, message: unknown): void {
     const m = asRecord(message) as Partial<PitchInput>;
     if (this.state.ballLive || !isVec3(m.aim) || !isFiniteNumber(m.spinInput)) {
@@ -196,13 +209,13 @@ export class MatchRoom extends Room<MatchState> {
     // cleared the crossing latches — record it now so the first checkRunOut
     // does not treat it as an exposure CHANGE and discard a legitimate
     // crossing from the very first tick of flight.
-    this.lastExposedPost = this.running.exposedPost();
+    this.lastExposedPost = this.firstExposedPost();
     this.state.demoLog = `hit! timing factor ${result.timingFactor.toFixed(2)}`;
   }
 
   private handleRunDecision(_client: Client, message: unknown): void {
     const m = asRecord(message) as Partial<RunDecisionInput>;
-    const runner = this.running.runner();
+    const runner = this.firstRunner();
     if (!this.state.ballLive || runner === null || runner.out || typeof m.go !== 'boolean') {
       this.state.demoLog = 'runDecision rejected (no live runner or malformed input)';
       return;
@@ -252,11 +265,11 @@ export class MatchRoom extends Room<MatchState> {
     // there is nothing yet to field: without this gate, a fielder standing at
     // the release point (the bowler) could roll a "catch" on their own
     // still-live pitch before the batter ever swings.
-    if (this.running.runner() !== null) {
+    if (this.firstRunner() !== null) {
       // Fielding sees the runner's pre-tick target (this tick's chase/cover
-      // decision); the run-out check below re-reads exposedPost() AFTER
+      // decision); the run-out check below re-reads the exposure AFTER
       // running.tick, per plan order.
-      const preExposed = this.running.exposedPost();
+      const preExposed = this.firstExposedPost();
       // Snapshot the exposed post's crossing latch BEFORE fielding runs: a
       // same-tick gather parks the ball (holdBallAt → placeBall), which clears
       // the crossing latches — without this snapshot, a ball that crossed the
@@ -317,7 +330,7 @@ export class MatchRoom extends Room<MatchState> {
    * CLAUDE.md §6.4) OR the ball's current holder is standing within range of it.
    */
   private checkRunOut(preExposed: number | null, crossedPreFielding: boolean): number | null {
-    const exposed = this.running.exposedPost();
+    const exposed = this.firstExposedPost();
     if (exposed !== this.lastExposedPost) {
       // Exposure changed since the last check (runner set off from a post,
       // passed one, or halted): crossings latched before this exposure began
@@ -362,7 +375,7 @@ export class MatchRoom extends Room<MatchState> {
     if (fieldingEvent !== null && fieldingEvent.kind === 'caught') {
       return { kind: 'caught', by: fieldingEvent.by };
     }
-    const runner = this.running.runner();
+    const runner = this.firstRunner();
     const runOutPost = this.checkRunOut(preExposed, crossedExposedPost);
     if (runOutPost !== null) {
       // M4/M5: a single-runner room — the runner put out is always the sole
@@ -415,7 +428,7 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   private syncRunner(): void {
-    const view = this.running.runner();
+    const view = this.firstRunner();
     if (view === null) {
       this.state.runner.id = '';
       this.state.runner.x = 0;
