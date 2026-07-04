@@ -9,13 +9,13 @@ rematches — over a server-authoritative connection.
 Built with **TypeScript (strict)**, **Three.js** (rendering), **Rapier**
 (physics), **Colyseus** (authoritative multiplayer server) and **Vite**.
 
-| The lobby | The draft |
+| The stadium | Mid-play |
 |---|---|
-| ![Lobby — create a match and share the 4-letter code](docs/superpowers/acceptance/m10-01-lobby.png) | ![Alternating character draft with stats and abilities](docs/superpowers/acceptance/m7-01-mid-draft.png) |
+| ![The stadium — stands, crowd, floodlights, striped grass, and the fielding side taking position](docs/superpowers/acceptance/visual-01-stadium.png) | ![Mid-play — a navy kit-A runner between posts while the maroon kit-B side fields](docs/superpowers/acceptance/visual-02-lineup.png) |
 
-| Mid-play HUD | Result screen |
+| Holding the ball | Result screen |
 |---|---|
-| ![Scorer's board, event feed and key legend during play](docs/superpowers/acceptance/m10-02-play-hud.png) | ![Game over — final score, winner and rematch](docs/superpowers/acceptance/m10-03-result-overlay.png) |
+| ![The bowler holds the gathered ball — gold holder ring at his feet, the Whale looming top-left](docs/superpowers/acceptance/visual-03-play.png) | ![Game over — final score, winner and rematch](docs/superpowers/acceptance/m10-03-result-overlay.png) |
 
 ## Quick start (one machine, two tabs)
 
@@ -53,9 +53,9 @@ Scoring is school rules: reach the 2nd post on your own hit for a
 run-outs end the batter; five outs end the innings; ties go to sudden-death.
 Every character has an ability (the bracketed tag on their draft card) that
 genuinely changes play — Kian's curveball bends late, the Whale stops any ball
-that hits him dead, Jonty never drops a catch, Joe fumbles 35% of his.
-
-![Fielding-side positioning panel with bench and substitutions](docs/superpowers/acceptance/m8-01-positioning-panel.png)
+that hits him dead, Jonty never drops a catch, Joe fumbles 35% of his. Each of
+the eleven has a distinct look on the field to match — the Whale is a 3.1 m
+giant, Joe a 1.3 m scrawn in a shirt two sizes too big.
 
 ## Playing over your local network (works today, no changes)
 

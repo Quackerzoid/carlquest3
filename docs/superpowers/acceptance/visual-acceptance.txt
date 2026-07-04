@@ -1,0 +1,39 @@
+[3.1s] OK: 4-letter room code displayed (got 'HJSZ')
+[5.5s] page 1 reached DRAFT with the pick sheet visible
+[6.2s] page 2 reached DRAFT with the pick sheet visible
+[21.2s] custom draft clicked through the UI: carl,kian,laurie,whale,josh,joe,joel,robbie,darcy,ricy (whale + joe on side B)
+[21.5s] page 1 board shows phase 'initial positioning'
+[21.8s] page 2 board shows phase 'initial positioning'
+[23.2s] visual-01-stadium.png written
+[23.2s] OK: sky sample at frame top is the warm gradient, not the old flat overcast blue (rgb 209,182,143 vs old 135,181,217)
+[23.2s] OK: upper half of the frame carries stadium richness — 1271 distinct quantised colours (a flat sky/green backdrop yields <10)
+[28.1s] page 2 panel-selected whale ([selected] badge shown) and ground-clicked (16, 26) — single click
+[31.9s] page 2 panel-selected joe ([selected] badge shown) and ground-clicked (0, 23) — single click
+[32.5s] whale rendered vertical extent at (16, 26): 52px (1127 changed px; window x=349 y=164..236)
+[32.5s] joe rendered vertical extent at (0, 23): 23px (160 changed px; window x=604 y=181..258)
+[32.5s] OK: picking regression: whale's figure renders at the clicked spot (1127 changed px — schema reposition + render both moved)
+[32.5s] OK: picking regression: joe's figure renders at the clicked spot (160 changed px)
+[32.5s] OK: joe is present and measurable (23px tall)
+[32.5s] OK: ANTI-PILL: whale's rendered height is ≥1.6× joe's at equal depth (ratio 2.26 — whale 52px vs joe 23px; world 3.1 m vs 1.3 m)
+[32.5s] whale's old slot (0, -3) also changed (vacated): 6793 changed px
+[32.5s] baselines (pre-play): topple-red 0 px, holder-gold 0 exact + 1 near-band px (field region)
+[35.1s] holder drill: window baseline 0 gold-band px — pitching with NO swing
+[44.7s] holder drill: ring NOT seen (window max 0 vs baseline 0) — will keep watching later plays
+[51.6s] play 1: Carl safe at post 3 · +1½
+[61.1s] play 2: no resolution (swing likely missed → silent re-pitch) — attempt 2
+[69.1s] play 2: no resolution (swing likely missed → silent re-pitch) — attempt 3
+[73.3s] play 2: caught by Kian · out: Laurie
+[74.0s] out-runner topple attempt: VERIFIED: red-tinted toppled runner after 'caught by Kian · out: Laurie' (370 red px vs baseline 0)
+[83.4s] play 3: no resolution (swing likely missed → silent re-pitch) — attempt 2
+[91.5s] play 3: no resolution (swing likely missed → silent re-pitch) — attempt 3
+[95.6s] play 3: Josh run out at post 2 · out: Josh
+[100.4s] HOLDER GOLD RING captured live on play 4: 337 gold-band px in the drill window → visual-03-play.png
+[101.3s] play 4: Joel run out at post 2 · out: Joel
+[101.5s] OK: at least one play resolved via real keydowns (4 plays driven)
+[101.5s] OK: a connected hit produced a running navy batter among maroon fielders (visual-02-lineup.png shows both kits)
+[101.6s] holder gold ring: VERIFIED live (play 4, +337 gold-band px in the field region, 321 exact; new-gold centroid (535, 526) of 338 px)
+[101.6s] OK: holder gold ring captured live (Task-3 reviewer ask)
+[101.6s] out-runner topple (best-effort): VERIFIED: red-tinted toppled runner after 'caught by Kian · out: Laurie' (370 red px vs baseline 0)
+[101.6s] OK: page 1 logged no page/console errors ()
+[101.6s] OK: page 2 logged no page/console errors ()
+[101.6s] VISUAL ACCEPTANCE PASSED — 4 plays; anti-pill ratio 2.26; holder ring captured; stadium colours 1271
