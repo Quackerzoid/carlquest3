@@ -63,7 +63,6 @@ export function createPositioningControls(
     const isOwnFielder = hitId !== null && (mySquad ?? []).includes(hitId);
     if (isOwnFielder && hitId !== pitcherId) {
       selection.set(hitId);
-      fielders.setSelected(hitId);
       onLocalAction(`selected fielder`);
       return;
     }
@@ -80,7 +79,6 @@ export function createPositioningControls(
   const handleKeydown = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape') return;
     selection.set(null);
-    fielders.setSelected(null);
   };
 
   canvas.addEventListener('click', handleClick);

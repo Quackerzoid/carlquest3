@@ -53,11 +53,16 @@ start();
 
 // Shared between PositioningControls (writer, on click) and DraftScreen (writer, on
 // bench click / reader, for the [selected] badge) — one selected fielder id at a time.
+// The store is the SINGLE source of truth for the 3D highlight: `set()` itself mirrors
+// to `fielders.setSelected`, so every selection path (3D click, panel click, Escape
+// clear, substitution, innings switch) stays in sync by construction — no caller may
+// call `fielders.setSelected` directly.
 let selectedFielderId: string | null = null;
 const selection: SelectionStore = {
   get: () => selectedFielderId,
   set: (id) => {
     selectedFielderId = id;
+    fielders.setSelected(id);
   },
 };
 
@@ -140,10 +145,12 @@ function hideLobby(): void {
 function runMatch(net: Net): void {
   let lastPlay = '';
   let localAction = '';
+  // Tracks the fielding/batting flip across innings so a leftover positioning
+  // selection from the old fielding side doesn't survive into the next one.
+  let lastBattingSide: string | null = null;
   // Per-net, like attachInput: holds the net closure. createDraftScreen empties
   // its container on creation, so re-entry after opponentLeft is clean.
   selection.set(null);
-  fielders.setSelected(null);
   const draftScreen = createDraftScreen(draft, net, selection);
   const refresh = () => {
     status.textContent = statusLine(net, net.room.state, lastPlay, localAction);
@@ -183,6 +190,10 @@ function runMatch(net: Net): void {
     showLobbySetup();
   });
   net.room.onStateChange((state) => {
+    if (state.battingSide !== lastBattingSide) {
+      lastBattingSide = state.battingSide;
+      selection.set(null);
+    }
     ball.update(state.ball.x, state.ball.y, state.ball.z, state.ballLive);
     fielders.update(state.fielders.values());
     runners.update(state.runners.values());

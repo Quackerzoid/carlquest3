@@ -110,6 +110,9 @@ export function createDraftScreen(
         const outId = selection.get();
         if (outId === null) return; // no fielder selected — nothing sensible to substitute out
         net.sendSubstitute({ outId, inId: id });
+        // Clear immediately: outId is about to be benched, so bench rows must
+        // disable (no selection) and a second substitute can't be sent against it.
+        selection.set(null);
       } else {
         selection.set(id);
       }

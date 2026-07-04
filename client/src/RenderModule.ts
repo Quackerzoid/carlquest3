@@ -85,6 +85,10 @@ export function createFieldersView(scene: THREE.Scene): FieldersView {
           scene.remove(mesh);
           mesh.geometry.dispose();
           meshes.delete(id);
+          // Belt-and-braces: if the selected fielder's mesh is gone (substituted
+          // out / side switch), drop the stale id so a later re-add (e.g. same id
+          // returning to the roster) doesn't resurrect an unintended highlight.
+          if (selected === id) selected = null;
         }
       }
     },
