@@ -46,6 +46,10 @@ export interface FielderState {
 export interface FieldersView {
   /** Call once per frame with the latest authoritative fielder set (any iterable). */
   update(fielders: Iterable<FielderState>): void;
+  /** Raycast against the current fielder meshes; returns the hit character id, or null. */
+  pickId(raycaster: THREE.Raycaster): string | null;
+  /** Mark one fielder (by id) as selected for repositioning, or clear with null. */
+  setSelected(id: string | null): void;
 }
 
 /** Capsule per fielder, keyed by character id; meshes are added/removed as the roster changes. */
@@ -54,6 +58,7 @@ export function createFieldersView(scene: THREE.Scene): FieldersView {
   const holderMat = new THREE.MeshLambertMaterial({ color: 0xf5c542 }); // tint: fielder currently holding the ball
   const meshes = new Map<string, THREE.Mesh>();
   const target = new THREE.Vector3();
+  let selected: string | null = null;
 
   return {
     update(fielders) {
@@ -70,6 +75,10 @@ export function createFieldersView(scene: THREE.Scene): FieldersView {
         target.set(fielder.x, HUMAN_EYE_HEIGHT, fielder.z);
         mesh.position.lerp(target, 0.5);
         mesh.material = fielder.hasBall ? holderMat : plainMat;
+        // Selection highlight: scale bump, consistent (additive) with the holder-tint
+        // material swap above rather than a second competing material mechanism.
+        const scale = fielder.id === selected ? 1.15 : 1;
+        mesh.scale.setScalar(scale);
       }
       for (const [id, mesh] of meshes) {
         if (!seen.has(id)) {
@@ -78,6 +87,16 @@ export function createFieldersView(scene: THREE.Scene): FieldersView {
           meshes.delete(id);
         }
       }
+    },
+    pickId(raycaster) {
+      const hits = raycaster.intersectObjects([...meshes.values()]);
+      const first = hits[0]?.object;
+      if (first === undefined) return null;
+      for (const [id, mesh] of meshes) if (mesh === first) return id;
+      return null;
+    },
+    setSelected(id) {
+      selected = id;
     },
   };
 }

@@ -4,6 +4,7 @@ import { connect, type MatchStateView, type Net } from './NetModule';
 import { createBallView, createFieldersView, createRunnersView } from './RenderModule';
 import { attachInput } from './InputModule';
 import { createDraftScreen } from './DraftScreen';
+import { createPositioningControls, type SelectionStore } from './PositioningControls';
 
 const canvasEl = document.querySelector<HTMLCanvasElement>('#app');
 const statusEl = document.querySelector<HTMLPreElement>('#status');
@@ -44,11 +45,21 @@ const createButton = createButtonEl;
 const joinButton = joinButtonEl;
 const joinCodeInput = joinCodeInputEl;
 
-const { scene, start } = createScene(canvas);
+const { scene, camera, start } = createScene(canvas);
 const ball = createBallView(scene);
 const fielders = createFieldersView(scene);
 const runners = createRunnersView(scene);
 start();
+
+// Shared between PositioningControls (writer, on click) and DraftScreen (writer, on
+// bench click / reader, for the [selected] badge) — one selected fielder id at a time.
+let selectedFielderId: string | null = null;
+const selection: SelectionStore = {
+  get: () => selectedFielderId,
+  set: (id) => {
+    selectedFielderId = id;
+  },
+};
 
 const HELP =
   'A/S/D spin · P pitch · Space swing · R run · T stop · Enter confirm/ready · N rematch ' +
@@ -95,10 +106,14 @@ function statusLine(net: Net, state: MatchStateView, lastPlay: string, localActi
     state.phase === 'INITIAL_POSITIONING' || state.phase === 'PRE_PLAY' || state.phase === 'PLAY'
       ? ` | bowler: ${characterName(state.currentPitcherId)}`
       : '';
+  const positioning = state.phase === 'INITIAL_POSITIONING' || state.phase === 'PRE_PLAY';
+  const isFielding = side !== null && state.battingSide !== side;
+  const subsUsed = side === 'A' ? state.subsUsedA : state.subsUsedB;
+  const subsSegment = positioning && isFielding ? ` | subs used: ${String(subsUsed ?? 0)}` : '';
   const head =
     `${state.phase} | ${score} | innings ${String(state.inningsIndex + 1)} | ` +
     `outs ${String(state.outs)} | batter: ${characterName(state.currentBatterId)}` +
-    `${tiebreak}${winner}${you}${draftSegment}${bowlerSegment}`;
+    `${tiebreak}${winner}${you}${draftSegment}${bowlerSegment}${subsSegment}`;
   const paused = state.paused === true ? 'opponent disconnected — waiting for reconnect' : '';
   const tail = [paused, lastPlay && `last: ${lastPlay}`, localAction, HELP].filter(Boolean).join(' — ');
   return `${head}\n${tail}`;
@@ -127,7 +142,9 @@ function runMatch(net: Net): void {
   let localAction = '';
   // Per-net, like attachInput: holds the net closure. createDraftScreen empties
   // its container on creation, so re-entry after opponentLeft is clean.
-  const draftScreen = createDraftScreen(draft, net);
+  selection.set(null);
+  fielders.setSelected(null);
+  const draftScreen = createDraftScreen(draft, net, selection);
   const refresh = () => {
     status.textContent = statusLine(net, net.room.state, lastPlay, localAction);
   };
@@ -136,6 +153,18 @@ function runMatch(net: Net): void {
     localAction = text;
     refresh();
   });
+  const positioningControls = createPositioningControls(
+    canvas,
+    camera,
+    fielders,
+    net,
+    selection,
+    (text) => {
+      const selectedId = selection.get();
+      localAction = selectedId ? `moving ${characterName(selectedId)} — click the field` : text;
+      refresh();
+    },
+  );
   net.onPlayOutcome((resolution) => {
     lastPlay = describeResolution(resolution);
     refresh();
@@ -147,6 +176,7 @@ function runMatch(net: Net): void {
   net.onOpponentLeft((side) => {
     status.textContent = `opponent left — match over (side ${side})`;
     detach();
+    positioningControls.detach();
     void net.room.leave().catch(() => {
       // Room may already be closing/closed server-side; nothing more to do.
     });

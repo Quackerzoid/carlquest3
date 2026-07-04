@@ -5,8 +5,11 @@ import type {
   MatchPhase,
   PitchInput,
   PlayResolution,
+  RepositionInput,
   RunDecisionInput,
+  SetBatterInput,
   SetPitcherInput,
+  SubstituteInput,
   SwingInput,
 } from '@carlquest/shared';
 
@@ -70,6 +73,16 @@ export interface MatchStateView {
   squadAIds: readonly string[];
   /** Character ids drafted onto side B's squad, in pick order. */
   squadBIds: readonly string[];
+  /** Character ids benched (not on-field) for side A, in bench order (Task 3, in flight). */
+  benchA: readonly string[];
+  /** Character ids benched (not on-field) for side B, in bench order (Task 3, in flight). */
+  benchB: readonly string[];
+  /** Substitutions side A has used so far this match (Task 3, in flight). */
+  subsUsedA: number;
+  /** Substitutions side B has used so far this match (Task 3, in flight). */
+  subsUsedB: number;
+  /** Batting side's upcoming-batter queue, current batter first (Task 3, in flight). */
+  queueIds: readonly string[];
 }
 
 export type ConnectOptions = { mode: 'create' } | { mode: 'join'; code: string };
@@ -95,6 +108,9 @@ export interface Net {
   sendRunDecision(input: RunDecisionInput): void;
   sendDraftPick(input: DraftPickInput): void;
   sendSetPitcher(input: SetPitcherInput): void;
+  sendReposition(input: RepositionInput): void;
+  sendSubstitute(input: SubstituteInput): void;
+  sendSetBatter(input: SetBatterInput): void;
   sendConfirmPositioning(): void;
   sendReadyForPlay(): void;
   sendRematch(): void;
@@ -139,6 +155,15 @@ export async function connect(opts: ConnectOptions): Promise<Net> {
     },
     sendSetPitcher(input) {
       room.send('setPitcher', input);
+    },
+    sendReposition(input) {
+      room.send('reposition', input);
+    },
+    sendSubstitute(input) {
+      room.send('substitute', input);
+    },
+    sendSetBatter(input) {
+      room.send('setBatter', input);
     },
     sendConfirmPositioning() {
       room.send('confirmPositioning');
