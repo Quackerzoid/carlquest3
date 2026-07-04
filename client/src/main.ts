@@ -132,6 +132,10 @@ function runMatch(net: Net): void {
   });
   net.onOpponentLeft((side) => {
     status.textContent = `opponent left — match over (side ${side})`;
+    void net.room.leave().catch(() => {
+      // Room may already be closing/closed server-side; nothing more to do.
+    });
+    showLobbySetup();
   });
   net.room.onStateChange((state) => {
     ball.update(state.ball.x, state.ball.y, state.ball.z, state.ballLive);
@@ -149,9 +153,6 @@ async function startCreate(): Promise<void> {
   try {
     const net = await connect({ mode: 'create' });
     showLobbyWaiting(net.room.state.roomCode);
-    net.room.onStateChange((state) => {
-      if (state.phase !== 'LOBBY') hideLobby();
-    });
     runMatch(net);
   } catch (error: unknown) {
     lobbyError.textContent = `could not create match: ${String(error)}`;
