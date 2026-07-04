@@ -26,6 +26,15 @@ describe('PositioningModule', () => {
     expect(pos.view().positions[id(1)]).toEqual({ x: 5, z: 20 }); // refusals do not move anyone
   });
 
+  it('keep-out boundary is inclusive-legal: distance exactly at the keep-out radius succeeds, strictly inside refuses', () => {
+    const pos = createPositioningModule([...SQUAD], 3);
+    // (0, -3) is the default backstop slot, distance exactly BATTING_SQUARE_KEEPOUT (3)
+    // from BATTING_SQUARE (0,0) — a moved backstop must be able to return here.
+    expect(pos.reposition(id(1), 0, -FIELD.BATTING_SQUARE_KEEPOUT)).toBe(true);
+    expect(pos.view().positions[id(1)]).toEqual({ x: 0, z: -FIELD.BATTING_SQUARE_KEEPOUT });
+    expect(pos.reposition(id(1), 0, -(FIELD.BATTING_SQUARE_KEEPOUT - 0.01))).toBe(false); // strictly inside
+  });
+
   it('substitute: bench swap inherits the position, cap enforced, membership validated', () => {
     const pos = createPositioningModule([...SQUAD], 3);
     pos.reposition(id(2), 8, 22);

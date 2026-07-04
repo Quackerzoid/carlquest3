@@ -971,9 +971,12 @@ export class MatchRoom extends Room<MatchState> {
 
     if (resolution === null) {
       // Defensive: resolvePlay only returns null out of PLAY / with no batter,
-      // neither of which should reach here. Log, clear runners, and recover.
+      // neither of which should reach here. Log, clear runners, rebuild fielding
+      // (the stamina ledger absorb above already ran; without a rebuild the stale
+      // module would regress the ledger by one play on the next absorb), and recover.
       console.error('[MatchRoom] resolvePlay returned null unexpectedly');
       this.running.reset();
+      this.rebuildFielding();
       this.syncRulesView();
       this.syncRunners();
       this.syncFielders();

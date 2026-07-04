@@ -217,13 +217,21 @@ export function createDraftScreen(
       const queue = state.queueIds ?? [];
       heading.textContent = 'next batter';
       list.innerHTML = '';
+
+      // Current batter is NOT in queueIds (spec: queue excludes them) — render as a
+      // separate disabled header row above the queue rather than dead-code-checking
+      // for it inside the queue loop.
+      if (state.currentBatterId) {
+        const current = buildRow(state.currentBatterId, statLineForId(state.currentBatterId));
+        const badge = current.querySelector<HTMLSpanElement>('.draft-row-badge');
+        current.disabled = true;
+        current.classList.add('is-taken');
+        if (badge) badge.textContent = '[batting]';
+        list.appendChild(current);
+      }
+
       for (const id of queue) {
         const row = buildRow(id, statLineForId(id));
-        const badge = row.querySelector<HTMLSpanElement>('.draft-row-badge');
-        const isBatting = state.currentBatterId === id;
-        row.disabled = isBatting;
-        row.classList.toggle('is-taken', isBatting);
-        if (badge) badge.textContent = isBatting ? '[batting]' : '';
         list.appendChild(row);
       }
     },

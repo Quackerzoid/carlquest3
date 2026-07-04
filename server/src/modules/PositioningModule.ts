@@ -42,7 +42,7 @@ export function createPositioningModule(
     if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
     if (x < zone.minX || x > zone.maxX || z < zone.minZ || z > zone.maxZ) return false;
     const dist = Math.hypot(x - FIELD.BATTING_SQUARE.x, z - FIELD.BATTING_SQUARE.z);
-    return dist > FIELD.BATTING_SQUARE_KEEPOUT;
+    return dist >= FIELD.BATTING_SQUARE_KEEPOUT;
   }
 
   return {

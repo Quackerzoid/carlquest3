@@ -73,15 +73,15 @@ export interface MatchStateView {
   squadAIds: readonly string[];
   /** Character ids drafted onto side B's squad, in pick order. */
   squadBIds: readonly string[];
-  /** Character ids benched (not on-field) for side A, in bench order (Task 3, in flight). */
+  /** Character ids benched (not on-field) for side A, in bench order. */
   benchA: readonly string[];
-  /** Character ids benched (not on-field) for side B, in bench order (Task 3, in flight). */
+  /** Character ids benched (not on-field) for side B, in bench order. */
   benchB: readonly string[];
-  /** Substitutions side A has used so far this match (Task 3, in flight). */
+  /** Substitutions side A has used so far this match. */
   subsUsedA: number;
-  /** Substitutions side B has used so far this match (Task 3, in flight). */
+  /** Substitutions side B has used so far this match. */
   subsUsedB: number;
-  /** Batting side's upcoming-batter queue, current batter first (Task 3, in flight). */
+  /** Batting side's upcoming-batter queue, EXCLUDING the current batter — front of the list is next up. */
   queueIds: readonly string[];
 }
 

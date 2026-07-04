@@ -184,6 +184,7 @@ function runMatch(net: Net): void {
     status.textContent = `opponent left — match over (side ${side})`;
     detach();
     positioningControls.detach();
+    selection.set(null);
     void net.room.leave().catch(() => {
       // Room may already be closing/closed server-side; nothing more to do.
     });
