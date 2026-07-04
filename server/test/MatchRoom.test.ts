@@ -149,12 +149,20 @@ describe('MatchRoom', () => {
     vi.restoreAllMocks();
   });
 
+  /** Seat two clients (join order fixes sides: first = A, second = B) and await both snapshots. */
+  async function connectPair(room: TestRoom): Promise<{ clientA: TestClient; clientB: TestClient }> {
+    const clientA = await colyseus.connectTo(room);
+    const clientB = await colyseus.connectTo(room);
+    await awaitClientState(clientA);
+    await awaitClientState(clientB);
+    return { clientA, clientB };
+  }
+
   // ---- Boot / lobby --------------------------------------------------------
 
-  it('advances the first client to INITIAL_POSITIONING on join (M5 lobby/draft stubs)', async () => {
+  it('advances to INITIAL_POSITIONING once both clients are seated (M5 draft stub)', async () => {
     const room = await colyseus.createRoom('match', {});
-    const client = await colyseus.connectTo(room);
-    await awaitClientState(client);
+    await connectPair(room);
     await waitForPhase(room, 'INITIAL_POSITIONING');
     expect(room.state.phase).toBe('INITIAL_POSITIONING');
     // The rules view is mirrored into the schema from the first frame.
@@ -187,8 +195,7 @@ describe('MatchRoom', () => {
 
   it('phase walk: join → INITIAL_POSITIONING → PRE_PLAY → PLAY → (caught) → PRE_PLAY with an out', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
-    const client = await colyseus.connectTo(room);
-    await awaitClientState(client);
+    const { clientA: client } = await connectPair(room);
 
     await waitForPhase(room, 'INITIAL_POSITIONING');
     client.send('confirmPositioning');
@@ -211,7 +218,7 @@ describe('MatchRoom', () => {
 
   it('pitch while in PLAY makes the ball live with stat-derived speed', async () => {
     const room = await colyseus.createRoom('match', {});
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
     for (let i = 0; i < 30; i += 1) {
@@ -226,7 +233,7 @@ describe('MatchRoom', () => {
 
   it('rejects a second pitch while the ball is live', async () => {
     const room = await colyseus.createRoom('match', {});
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
     await room.waitForNextSimulationTick();
@@ -240,7 +247,7 @@ describe('MatchRoom', () => {
 
   it('rejects a swing when no ball is live', async () => {
     const room = await colyseus.createRoom('match', {});
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     client.send('swing', { timing: 0, aim: { x: 0.5, y: 0.3, z: 1 }, spinInput: 0 });
     await room.waitForNextSimulationTick();
@@ -250,7 +257,7 @@ describe('MatchRoom', () => {
 
   it('rejects a pitch message sent with no payload instead of crashing', async () => {
     const room = await colyseus.createRoom('match', {});
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     client.send('pitch');
     await room.waitForNextSimulationTick();
@@ -260,7 +267,7 @@ describe('MatchRoom', () => {
 
   it('rejects a swing message sent with a null payload instead of crashing', async () => {
     const room = await colyseus.createRoom('match', {});
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     client.send('swing', null);
     await room.waitForNextSimulationTick();
@@ -270,7 +277,7 @@ describe('MatchRoom', () => {
 
   it('stays responsive to a valid pitch after payload-less pitch/swing messages', async () => {
     const room = await colyseus.createRoom('match', {});
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     client.send('pitch');
     await room.waitForNextSimulationTick();
@@ -289,7 +296,7 @@ describe('MatchRoom', () => {
 
   it('full loop: pitch, wait for plane crossing, swing connects and reverses flight', async () => {
     const room = await colyseus.createRoom('match', {});
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
     await waitNearPlane(room);
@@ -305,7 +312,7 @@ describe('MatchRoom', () => {
 
   it('a connected hit starts a runner heading towards post 1', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     await pitchThenSwing(room, client, { x: 0.5, y: 0.3, z: 1 });
     await room.waitForNextSimulationTick();
@@ -318,7 +325,7 @@ describe('MatchRoom', () => {
 
   it('runDecision {go:false} halts the runner at post 1, and the play ends safe there', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     await pitchThenSwing(room, client, { x: 0.5, y: 0.3, z: 1 });
     client.send('runDecision', { go: false });
@@ -340,7 +347,7 @@ describe('MatchRoom', () => {
 
   it('rejects runDecision when no live ball, no active runner, or a malformed payload', async () => {
     const room = await colyseus.createRoom('match', {});
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
 
     client.send('runDecision', { go: true });
@@ -364,7 +371,7 @@ describe('MatchRoom', () => {
     if (post1 === undefined) throw new Error('no post 1 in fixture');
 
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     let received: PlayResolution | null = null;
     client.onMessage('playOutcome', (payload: PlayResolution) => {
@@ -388,7 +395,7 @@ describe('MatchRoom', () => {
     const post2 = FIELD.POSTS[1];
     if (post2 === undefined) throw new Error('no post 2 in fixture');
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
 
     await pitchThenSwingAtTarget(room, client, post2, 0);
@@ -419,7 +426,7 @@ describe('MatchRoom', () => {
     const post2 = FIELD.POSTS[1];
     if (post2 === undefined) throw new Error('no post 2 in fixture');
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
 
     // A near-plane (reliable, factor≈1) LOW −10° drive aimed at post 2: it blasts
@@ -470,7 +477,7 @@ describe('MatchRoom', () => {
 
   it('a hit flown straight at the bowler is caught (pre-bounce) → the batter is out', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     let received: PlayResolution | null = null;
     client.onMessage('playOutcome', (payload: PlayResolution) => {
@@ -497,7 +504,7 @@ describe('MatchRoom', () => {
     };
     const room = await colyseus.createRoom('match', { rng: corridorGatherRng });
     roomRef = room;
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     let received: PlayResolution | null = null;
     client.onMessage('playOutcome', (payload: PlayResolution) => {
@@ -527,8 +534,7 @@ describe('MatchRoom', () => {
 
   it('rejects every message out of its phase, broadcasting a structured { message, phase, reason }', async () => {
     const room = await colyseus.createRoom('match', {});
-    const client = await colyseus.connectTo(room);
-    await awaitClientState(client);
+    const { clientA: client } = await connectPair(room);
     const rejects: { message: string; phase: MatchPhase; reason: string }[] = [];
     client.onMessage('rejected', (p: { message: string; phase: MatchPhase; reason: string }) => rejects.push(p));
 
@@ -575,7 +581,7 @@ describe('MatchRoom', () => {
     // half-rounder (post ≥ 2 = +1 half), which exercises the same
     // settlePlay → resolvePlay → scoreHalves wiring. See task-5 report / TUNING.
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
 
     // A max-elevation (+60°) hard hit up the +z line: the ball hangs high, well
@@ -597,7 +603,7 @@ describe('MatchRoom', () => {
 
   it('a caught batter increments the batting side outs', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
     await pitchThenSwingAtTarget(room, client, FIELD.BOWLING_SQUARE, 0);
     const res = await waitPlayEnd(room, 120);
@@ -610,7 +616,7 @@ describe('MatchRoom', () => {
 
   it('two runners are visible in the schema after a play where the first parked safe', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
 
     // Play 1: Carl halts safe at post 1 and parks there.
     await startPlay(room, client);
@@ -644,8 +650,7 @@ describe('MatchRoom', () => {
     let scoringPlay = true;
     const rng = (): number => (scoringPlay ? 0.999 : 0);
     const room = await colyseus.createRoom('match', { rng });
-    const client = await colyseus.connectTo(room);
-    await awaitClientState(client);
+    const { clientA: client } = await connectPair(room);
 
     let plays = 0;
     while (room.state.phase !== 'GAME_OVER' && plays < 60) {
@@ -672,8 +677,7 @@ describe('MatchRoom', () => {
     let scoringPlay = true;
     const rng = (): number => (scoringPlay ? 0.999 : 0);
     const room = await colyseus.createRoom('match', { rng });
-    const client = await colyseus.connectTo(room);
-    await awaitClientState(client);
+    const { clientA: client } = await connectPair(room);
 
     let plays = 0;
     while (room.state.phase !== 'GAME_OVER' && plays < 60) {
@@ -705,7 +709,7 @@ describe('MatchRoom', () => {
     const errorSpy = vi.spyOn(console, 'error');
     const garbage = { rng: 1, seed: 'not-a-number' } as unknown as Record<string, unknown>;
     const room = await colyseus.createRoom('match', garbage);
-    const client = await colyseus.connectTo(room);
+    const { clientA: client } = await connectPair(room);
     await startPlay(room, client);
 
     client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
@@ -731,4 +735,46 @@ describe('MatchRoom', () => {
     );
     expect(uncaught).toEqual([]);
   }, 30000);
+
+  // ---- M6: seats, room code, real lobby wait -------------------------------
+
+  describe('M6 lobby & seats', () => {
+    it('holds in LOBBY with one client, advances on the second, seats by join order', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const clientA = await colyseus.connectTo(room);
+      await awaitClientState(clientA);
+      for (let i = 0; i < 30; i += 1) await room.waitForNextSimulationTick();
+      expect(room.state.phase).toBe('LOBBY'); // no fast-forward on first join any more
+      expect(room.state.sessionA).toBe(clientA.sessionId);
+      expect(room.state.sessionB).toBe('');
+
+      const clientB = await colyseus.connectTo(room);
+      await awaitClientState(clientB);
+      await waitForPhase(room, 'INITIAL_POSITIONING');
+      expect(room.state.sessionB).toBe(clientB.sessionId);
+      expect(room.state.connectedA).toBe(true);
+      expect(room.state.connectedB).toBe(true);
+    });
+
+    it('matches a filtered join to the room with that code, and rejects a wrong code', async () => {
+      const created = await colyseus.sdk.create<MatchState>('match', { code: 'ABCD' });
+      const joined = await colyseus.sdk.join<MatchState>('match', { code: 'ABCD' });
+      expect(joined.roomId).toBe(created.roomId);
+      await expect(colyseus.sdk.join('match', { code: 'ZZZZ' })).rejects.toThrow();
+      await created.leave();
+      await joined.leave();
+    });
+
+    it('mirrors a valid creation code into state and rejects a malformed one', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { code: 'GXQT' });
+      expect(room.state.roomCode).toBe('GXQT');
+      await expect(colyseus.createRoom('match', { code: 'nope!' })).rejects.toThrow();
+    });
+
+    it('locks the room at two clients', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', {});
+      await connectPair(room);
+      await expect(colyseus.connectTo(room)).rejects.toThrow();
+    });
+  });
 });

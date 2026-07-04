@@ -11,7 +11,7 @@ import { MatchRoom } from './rooms/MatchRoom';
 /** Single app config shared by the real entrypoint and @colyseus/testing. */
 const appConfig: ConfigOptions = {
   initializeGameServer: (gameServer) => {
-    gameServer.define('match', MatchRoom);
+    gameServer.define('match', MatchRoom).filterBy(['code']);
   },
 };
 

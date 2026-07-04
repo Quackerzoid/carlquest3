@@ -64,6 +64,14 @@ interface Resolved {
 interface MatchRoomOptions {
   rng?: () => number;
   seed?: number;
+  /**
+   * Client-generated 4-letter rendezvous code for room-code matchmaking.
+   * `filterBy(['code'])` matches on CREATION options, so the server cannot
+   * invent this itself — a server-picked code could never match a filtered
+   * join. Absent = no code (tests / direct createRoom); present-but-malformed
+   * is rejected in onCreate.
+   */
+  code?: string;
 }
 
 function isFiniteNumber(n: unknown): n is number {
@@ -126,7 +134,15 @@ export class MatchRoom extends Room<MatchState> {
   private lastExposedPosts: Set<number> = new Set();
 
   override async onCreate(options: MatchRoomOptions = {}): Promise<void> {
+    // The room code is client-generated (filterBy matches CREATION options; a
+    // server-invented code could never match a filtered join). Absent = no code
+    // (tests / direct createRoom); present-but-malformed = reject the creation.
+    if (options.code !== undefined && !/^[A-Z]{4}$/.test(String(options.code))) {
+      throw new Error(`invalid room code: ${String(options.code)}`);
+    }
+
     this.setState(new MatchState());
+    if (options.code !== undefined) this.state.roomCode = options.code;
     this.physics = await createPhysicsModule();
 
     // Mirror-roster demo squads (both sides = full table, batting order = table order).
@@ -164,17 +180,31 @@ export class MatchRoom extends Room<MatchState> {
 
   override onJoin(client: Client): void {
     console.log(`client ${client.sessionId} joined`);
-    // M5 single-player stubs: the first client to join completes the lobby →
-    // draft → positioning gates immediately (bothConnected/completeDraft only
-    // fire in LOBBY/DRAFT, so a later join is a no-op). Real 2-player lobby,
-    // draft and positioning land in M6–M8.
-    this.rules.bothConnected();
-    this.rules.completeDraft();
+    if (this.state.sessionA === '') {
+      this.state.sessionA = client.sessionId;
+      this.state.connectedA = true;
+    } else if (this.state.sessionB === '') {
+      this.state.sessionB = client.sessionId;
+      this.state.connectedB = true;
+      // Both seats filled: leave LOBBY. DRAFT stays auto-skipped with the
+      // mirror-roster demo squads until M7.
+      this.rules.bothConnected();
+      this.rules.completeDraft();
+    }
     this.syncRulesView();
   }
 
   override onLeave(client: Client): void {
     console.log(`client ${client.sessionId} left`);
+    // Pre-game leave frees the seat; mid-game disconnect handling lands in Task 3.
+    if (this.phase() !== 'LOBBY') return;
+    if (this.state.sessionA === client.sessionId) {
+      this.state.sessionA = '';
+      this.state.connectedA = false;
+    } else if (this.state.sessionB === client.sessionId) {
+      this.state.sessionB = '';
+      this.state.connectedB = false;
+    }
   }
 
   override onDispose(): void {

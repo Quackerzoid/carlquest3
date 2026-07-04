@@ -81,4 +81,13 @@ export class MatchState extends Schema {
    * server state reliably (the broadcast is also sent to clients). '' initially.
    */
   @type('string') lastRejection = '';
+
+  // --- M6 seats & room code -------------------------------------------------
+  /** 4-letter room code from the creation options ('' if created without one, e.g. tests). */
+  @type('string') roomCode = '';
+  /** SessionIds seated as side A (creator/first join) and side B; '' while unseated. */
+  @type('string') sessionA = '';
+  @type('string') sessionB = '';
+  @type('boolean') connectedA = false;
+  @type('boolean') connectedB = false;
 }
