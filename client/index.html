@@ -75,11 +75,67 @@
       }
       #lobby-waiting .hint { color: #a9a494; font-size: 0.8em; }
       #lobby-error { color: #d98c6b; font-size: 0.8em; min-height: 1.2em; margin-top: 0.5em; }
+
+      /* --- Draft sheet: a scorer's roster ledger, pinned to one edge, never blocking
+         the status line or the field. Rows, not cards — this is a list you read down,
+         not a hand you fan out. --- */
+      .draft-sheet {
+        position: fixed;
+        top: 8px;
+        right: 8px;
+        width: 26em;
+        max-width: calc(100vw - 16px);
+        max-height: calc(100vh - 16px);
+        overflow-y: auto;
+        background: rgba(10, 12, 8, 0.72);
+        border: 1px solid #f5f1e6;
+        font-family: monospace;
+        color: #f5f1e6;
+        font-size: 12px;
+      }
+      .draft-sheet[hidden] { display: none; }
+      .draft-sheet-heading {
+        padding: 0.6em 0.8em;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-size: 0.9em;
+        border-bottom: 1px solid #f5f1e6;
+      }
+      .draft-sheet-rows { display: flex; flex-direction: column; }
+      .draft-row {
+        display: grid;
+        grid-template-columns: 5.5em 1fr 4.5em;
+        align-items: baseline;
+        gap: 0.6em;
+        width: 100%;
+        font-family: monospace;
+        font-size: 1em;
+        text-align: left;
+        color: #f5f1e6;
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid #3c4232;
+        padding: 0.45em 0.8em;
+        cursor: pointer;
+      }
+      .draft-row:last-child { border-bottom: none; }
+      .draft-row:disabled { cursor: default; }
+      .draft-row:not(:disabled):hover { background: rgba(245, 241, 230, 0.12); }
+      .draft-row-name { letter-spacing: 0.04em; }
+      .draft-row-stats { color: #a9a494; font-size: 0.92em; }
+      .draft-row-badge {
+        text-align: right;
+        letter-spacing: 0.04em;
+        color: #a9a494;
+      }
+      .draft-row.is-taken { opacity: 0.4; }
+      .draft-row.is-taken .draft-row-badge { color: #f5f1e6; }
     </style>
   </head>
   <body>
     <canvas id="app"></canvas>
     <pre id="status">connecting…</pre>
+    <div id="draft" hidden></div>
 
     <div id="lobby">
       <div id="lobby-card">

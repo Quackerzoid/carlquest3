@@ -3,9 +3,11 @@ import { createScene } from './SceneModule';
 import { connect, type MatchStateView, type Net } from './NetModule';
 import { createBallView, createFieldersView, createRunnersView } from './RenderModule';
 import { attachInput } from './InputModule';
+import { createDraftScreen } from './DraftScreen';
 
 const canvasEl = document.querySelector<HTMLCanvasElement>('#app');
 const statusEl = document.querySelector<HTMLPreElement>('#status');
+const draftEl = document.querySelector<HTMLDivElement>('#draft');
 const lobbyEl = document.querySelector<HTMLDivElement>('#lobby');
 const lobbySetupEl = document.querySelector<HTMLDivElement>('#lobby-setup');
 const lobbyWaitingEl = document.querySelector<HTMLDivElement>('#lobby-waiting');
@@ -17,6 +19,7 @@ const joinCodeInputEl = document.querySelector<HTMLInputElement>('#join-code');
 if (
   !canvasEl ||
   !statusEl ||
+  !draftEl ||
   !lobbyEl ||
   !lobbySetupEl ||
   !lobbyWaitingEl ||
@@ -31,6 +34,7 @@ if (
 // Rebind as non-null so nested functions below don't need re-narrowing.
 const canvas = canvasEl;
 const status = statusEl;
+const draft = draftEl;
 const lobby = lobbyEl;
 const lobbySetup = lobbySetupEl;
 const lobbyWaiting = lobbyWaitingEl;
@@ -83,10 +87,18 @@ function statusLine(net: Net, state: MatchStateView, lastPlay: string, localActi
   const side = net.mySide();
   const role = net.myRole();
   const you = side ? ` | you are ${side}${role ? ` · ${role}` : ''}` : '';
+  const draftSegment =
+    state.phase === 'DRAFT'
+      ? ` | ${state.draftTurn === side ? 'your pick' : 'opponent picks'}`
+      : '';
+  const bowlerSegment =
+    state.phase === 'INITIAL_POSITIONING' || state.phase === 'PRE_PLAY' || state.phase === 'PLAY'
+      ? ` | bowler: ${characterName(state.currentPitcherId)}`
+      : '';
   const head =
     `${state.phase} | ${score} | innings ${String(state.inningsIndex + 1)} | ` +
     `outs ${String(state.outs)} | batter: ${characterName(state.currentBatterId)}` +
-    `${tiebreak}${winner}${you}`;
+    `${tiebreak}${winner}${you}${draftSegment}${bowlerSegment}`;
   const paused = state.paused === true ? 'opponent disconnected — waiting for reconnect' : '';
   const tail = [paused, lastPlay && `last: ${lastPlay}`, localAction, HELP].filter(Boolean).join(' — ');
   return `${head}\n${tail}`;
@@ -113,6 +125,9 @@ function hideLobby(): void {
 function runMatch(net: Net): void {
   let lastPlay = '';
   let localAction = '';
+  // Per-net, like attachInput: holds the net closure. createDraftScreen empties
+  // its container on creation, so re-entry after opponentLeft is clean.
+  const draftScreen = createDraftScreen(draft, net);
   const refresh = () => {
     status.textContent = statusLine(net, net.room.state, lastPlay, localAction);
   };
@@ -148,6 +163,7 @@ function runMatch(net: Net): void {
     } else {
       hideLobby();
     }
+    draftScreen.update(state, net.mySide());
     refresh();
   });
 }

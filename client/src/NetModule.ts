@@ -1,10 +1,12 @@
 /** Colyseus connection (grows into the full NetModule in Milestone 6). */
 import { Client, type Room } from 'colyseus.js';
 import type {
+  DraftPickInput,
   MatchPhase,
   PitchInput,
   PlayResolution,
   RunDecisionInput,
+  SetPitcherInput,
   SwingInput,
 } from '@carlquest/shared';
 
@@ -60,6 +62,14 @@ export interface MatchStateView {
   winner: string;
   lastOutcome: string;
   lastRejection: string;
+  /** Whose turn to pick during phase === 'DRAFT' ('A' | 'B', server-authoritative). */
+  draftTurn: string;
+  /** Character ids still available to draft. */
+  draftRemaining: readonly string[];
+  /** Character ids drafted onto side A's squad, in pick order. */
+  squadAIds: readonly string[];
+  /** Character ids drafted onto side B's squad, in pick order. */
+  squadBIds: readonly string[];
 }
 
 export type ConnectOptions = { mode: 'create' } | { mode: 'join'; code: string };
@@ -83,6 +93,8 @@ export interface Net {
   sendPitch(input: PitchInput): void;
   sendSwing(input: SwingInput & { timing: number }): void;
   sendRunDecision(input: RunDecisionInput): void;
+  sendDraftPick(input: DraftPickInput): void;
+  sendSetPitcher(input: SetPitcherInput): void;
   sendConfirmPositioning(): void;
   sendReadyForPlay(): void;
   sendRematch(): void;
@@ -121,6 +133,12 @@ export async function connect(opts: ConnectOptions): Promise<Net> {
     },
     sendRunDecision(input) {
       room.send('runDecision', input);
+    },
+    sendDraftPick(input) {
+      room.send('draftPick', input);
+    },
+    sendSetPitcher(input) {
+      room.send('setPitcher', input);
     },
     sendConfirmPositioning() {
       room.send('confirmPositioning');
