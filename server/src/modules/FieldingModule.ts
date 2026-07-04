@@ -129,6 +129,8 @@ interface FielderState {
   readonly character: Character;
   /** Setup slot, restored by reset(). */
   readonly home: { x: number; z: number };
+  /** Setup stamina (the M8 ledger seed; stat when unseeded), restored by reset(). */
+  readonly seedStamina: number;
   x: number;
   z: number;
   stamina: number;
@@ -148,9 +150,10 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
   const fielders: FielderState[] = setup.map((s) => ({
     character: s.character,
     home: { x: s.position.x, z: s.position.z },
+    seedStamina: s.stamina ?? s.character.stats.stamina,
     x: s.position.x,
     z: s.position.z,
-    stamina: s.character.stats.stamina,
+    stamina: s.stamina ?? s.character.stats.stamina,
     hasBall: false,
     latched: false,
   }));
@@ -355,7 +358,7 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
       for (const f of fielders) {
         f.x = f.home.x;
         f.z = f.home.z;
-        f.stamina = f.character.stats.stamina;
+        f.stamina = f.seedStamina;
         f.hasBall = false;
         f.latched = false;
       }

@@ -1126,4 +1126,130 @@ describe('MatchRoom', () => {
       expect(received).toEqual([{ side: 'B' }]);
     }, 10000);
   });
+
+  // ---- M8: positioning, substitutions, batter choice, stamina ledger --------
+
+  describe('M8 positioning', () => {
+    it('fielding side repositions a fielder; the schema fielder moves and survives into PLAY', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      await draftSquads(room, clientA, clientB);
+      clientB.send('reposition', { id: 'josh', x: 5, z: 20 });
+      await waitForCondition(room, () => room.state.fielders.get('josh')?.x === 5);
+      expect(room.state.fielders.get('josh')?.z).toBe(20);
+      await startPlay(room, clientA, clientB);
+      expect(room.state.fielders.get('josh')?.x).toBe(5); // layout survived PRE_PLAY → PLAY
+      clientB.send('reposition', { id: 'josh', x: 6, z: 20 }); // locked in PLAY
+      await waitForCondition(room, () => room.state.lastRejection.includes('reposition'));
+      expect(room.state.fielders.get('josh')?.x).toBe(5);
+    }, 20000);
+
+    it('rejects: batting side (wrongRole), the pitcher, out-of-zone and keep-out spots', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      await draftSquads(room, clientA, clientB);
+      clientA.send('reposition', { id: 'joel', x: 5, z: 20 });
+      await waitForCondition(room, () => room.state.lastRejection.includes('reposition'));
+      expect(JSON.parse(room.state.lastRejection).reason).toBe('wrongRole');
+      clientB.send('reposition', { id: 'kian', x: 5, z: 20 }); // the pitcher — nominate, don't drag
+      await waitForCondition(room, () => JSON.parse(room.state.lastRejection).reason.includes('pitcher'));
+      clientB.send('reposition', { id: 'josh', x: 999, z: 20 });
+      await waitForCondition(room, () => JSON.parse(room.state.lastRejection).reason.includes('illegal'));
+      // Clear the mirror so the NEXT illegal-spot rejection is provably fresh —
+      // the previous reason also said 'illegal', so a bare includes() would pass
+      // vacuously without the server ever rejecting the keep-out spot.
+      room.state.lastRejection = '';
+      clientB.send('reposition', { id: 'josh', x: 1, z: 1 }); // inside the batting-square keep-out
+      await waitForCondition(room, () => JSON.parse(room.state.lastRejection || '{"reason":""}').reason.includes('illegal'));
+      // Nothing moved: josh still sits on his default slot.
+      expect(room.state.fielders.get('josh')?.x).toBe(FIELD.FIELDING_POSITIONS[1]?.x);
+    }, 20000);
+
+    it('layout persists across an innings switch and returns intact next innings', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_CATCH });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      await draftSquads(room, clientA, clientB);
+      clientB.send('reposition', { id: 'josh', x: 5, z: 20 });
+      await waitForCondition(room, () => room.state.fielders.get('josh')?.x === 5);
+      // Bat out side A, then side B — back to A batting, B fielding. Uses the
+      // deterministic caught-at-the-bowler idiom of the M7 innings-switch test
+      // (ALWAYS_CATCH + flat drive at the bowling square = one out per play);
+      // the brief's flat midfield drive lands post-bounce (gathered, no out)
+      // and would never drain the queue.
+      let plays = 0;
+      while (room.state.battingSide === 'A' && room.state.phase !== 'GAME_OVER' && plays < 8) {
+        await startPlay(room, clientA, clientB);
+        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
+        await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
+        plays += 1;
+      }
+      expect(room.state.battingSide).toBe('B');
+      expect(room.state.fielders.get('joel')).toBeDefined(); // A's five field now
+      plays = 0;
+      while (room.state.battingSide === 'B' && room.state.phase !== 'GAME_OVER' && plays < 8) {
+        await startPlay(room, clientA, clientB);
+        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
+        await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
+        plays += 1;
+      }
+      if (room.state.phase !== 'GAME_OVER') {
+        expect(room.state.fielders.get('josh')?.x).toBe(5); // B's custom layout came back
+        expect(room.state.fielders.get('josh')?.z).toBe(20);
+      }
+    }, 120000);
+
+    it('substitute works with a real bench (fieldSlotsOverride) and syncs bench/count', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS, fieldSlotsOverride: 3 });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      await draftSquads(room, clientA, clientB);
+      expect([...room.state.benchB]).toEqual(['robbie', 'ricy']); // B's picks 4-5 benched at 3 slots
+      expect(room.state.fielders.size).toBe(3);
+      clientB.send('substitute', { outId: 'josh', inId: 'ricy' });
+      await waitForCondition(room, () => room.state.subsUsedB === 1);
+      expect(room.state.fielders.get('ricy')).toBeDefined();
+      expect(room.state.fielders.get('josh')).toBeUndefined();
+      expect([...room.state.benchB]).toContain('josh');
+      clientA.send('substitute', { outId: 'joel', inId: 'joe' }); // batting side
+      await waitForCondition(
+        room,
+        () => room.state.lastRejection !== '' && JSON.parse(room.state.lastRejection).reason === 'wrongRole',
+      );
+    }, 20000);
+
+    it('setBatter: batting side picks any queued batter; fielding side rejected', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      await draftSquads(room, clientA, clientB);
+      expect(room.state.currentBatterId).toBe('carl');
+      expect([...room.state.queueIds]).toEqual(['laurie', 'joel', 'jonty', 'joe']);
+      clientB.send('setBatter', { id: 'joe' });
+      await waitForCondition(
+        room,
+        () => room.state.lastRejection !== '' && JSON.parse(room.state.lastRejection).reason === 'wrongRole',
+      );
+      clientA.send('setBatter', { id: 'joe' });
+      await waitForCondition(room, () => room.state.currentBatterId === 'joe');
+      expect([...room.state.queueIds]).toEqual(['carl', 'laurie', 'joel', 'jonty']);
+    }, 20000);
+
+    it('stamina persists across plays and the benched regain (ledger)', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS, fieldSlotsOverride: 3 });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      await draftSquads(room, clientA, clientB);
+      await startPlay(room, clientA, clientB);
+      await pitchThenSwing(room, clientA, clientB, { x: 0.55, y: 0.47, z: 0.65 });
+      await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
+      // A chaser sprinted last play: SOME on-field fielder is below stat stamina next play.
+      const drained = [...room.state.fielders.values()].some(
+        (f) => f.stamina < (CHARACTERS.find((c) => c.id === f.id)?.stats.stamina ?? 0),
+      );
+      expect(drained).toBe(true);
+    }, 30000);
+  });
 });

@@ -421,3 +421,24 @@ describe('pressure (M5)', () => {
     expect(event).toEqual({ kind: 'caught', by: 'carl' });
   });
 });
+
+describe('stamina seed (M8 ledger)', () => {
+  it('a seeded stamina overrides the stat initially AND after reset()', () => {
+    const { deps } = makeDeps();
+    const m = createFieldingModule([{ ...at(carl, 0, 0), stamina: 2 }], deps);
+    expect(view(m).stamina).toBe(2); // seeded, not carl's stat (7)
+    m.tick(DT, rolling(50, 50), true, null); // sprint one tick so stamina moves off the seed
+    expect(view(m).stamina).toBeLessThan(2);
+    m.reset();
+    expect(view(m).stamina).toBe(2); // reset restores the SEED, not the stat
+  });
+
+  it('an absent stamina field still defaults to the character stat', () => {
+    const { deps } = makeDeps();
+    const m = createFieldingModule([at(carl, 0, 0)], deps);
+    expect(view(m).stamina).toBe(carl.stats.stamina);
+    m.tick(DT, rolling(50, 50), true, null);
+    m.reset();
+    expect(view(m).stamina).toBe(carl.stats.stamina);
+  });
+});

@@ -105,6 +105,12 @@ export type PlayOutcome =
 export interface FielderSetup {
   character: Character;
   position: { x: number; z: number };
+  /**
+   * Initial stamina for this play (M8 cross-play ledger); absent = the
+   * character's stat stamina. FieldingModule.reset() restores THIS seeded
+   * value, not the stat.
+   */
+  stamina?: number;
 }
 
 /** §7 draftPick message: the character the current picker takes. */

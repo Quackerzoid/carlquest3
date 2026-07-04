@@ -91,6 +91,15 @@ export class MatchState extends Schema {
   @type(['string']) squadAIds = new ArraySchema<string>();
   @type(['string']) squadBIds = new ArraySchema<string>();
 
+  // --- M8 positioning ---------------------------------------------------------
+  /** Benched ids per side (pick order). Empty until squads outgrow the field slots. */
+  @type(['string']) benchA = new ArraySchema<string>();
+  @type(['string']) benchB = new ArraySchema<string>();
+  @type('number') subsUsedA = 0;
+  @type('number') subsUsedB = 0;
+  /** The BATTING side's remaining queue (front first, excludes the current batter). */
+  @type(['string']) queueIds = new ArraySchema<string>();
+
   // --- M6 seats & room code -------------------------------------------------
   /** 4-letter room code from the creation options ('' if created without one, e.g. tests). */
   @type('string') roomCode = '';

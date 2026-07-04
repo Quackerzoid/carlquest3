@@ -10,11 +10,15 @@ import {
   type MatchPhase,
   type PitchInput,
   type PlayOutcome,
+  type RepositionInput,
   type RunDecisionInput,
+  type SetBatterInput,
   type SetPitcherInput,
+  type SubstituteInput,
   type SwingInput,
   type TeamSide,
 } from '@carlquest/shared';
+import { createPositioningModule } from '../modules/PositioningModule';
 import { createPhysicsModule, type PhysicsModule } from '../modules/PhysicsModule';
 import { resolvePitch } from '../modules/PitchModule';
 import { resolveSwing } from '../modules/HitModule';
@@ -60,6 +64,14 @@ interface MatchRoomOptions {
    * CONST.GAME.RECONNECT_GRACE_S.
    */
   reconnectGraceS?: number;
+  /**
+   * Test-only override of the on-field slot count, so small drafted squads can
+   * still exercise a real bench. Wire-reachable like `seed` (joinOrCreate
+   * forwards creation options), so runtime-validated the same way: a positive
+   * integer ≤ FIELDING_POSITIONS.length; junk/absent falls back to the full
+   * slot count.
+   */
+  fieldSlotsOverride?: number;
 }
 
 function isFiniteNumber(n: unknown): n is number {
@@ -111,6 +123,11 @@ export class MatchRoom extends Room<MatchState> {
   private builtFieldingSide: TeamSide | null = null;
   /** Fielding rng captured once in onCreate so rebuilds reuse the same validated source. */
   private fieldingRng!: () => number;
+  /** Per-side positioning state (layouts, bench, subs); null until the draft completes. */
+  private positioning: Record<TeamSide, ReturnType<typeof createPositioningModule>> | null = null;
+  /** Cross-play stamina ledger (spec §4 BENCH_STAMINA_REGEN; M8 closes the static-stamina gap). */
+  private staminaById = new Map<string, number>();
+  private fieldSlots: number = FIELD.FIELDING_POSITIONS.length;
   private simTime = 0;
   /** Sim-time when the live ball crossed the batting-square plane; null until it does. */
   private contactTime: number | null = null;
@@ -158,10 +175,18 @@ export class MatchRoom extends Room<MatchState> {
     return this.rules.view().battingSide === 'A' ? 'B' : 'A';
   }
 
-  /** Highest pitch stat wins; ties go to the earlier pick (array order). */
-  private defaultPitcherId(squad: Character[]): string {
+  /**
+   * Highest pitch stat among the given ON-FIELD ids wins; ties go to the earlier
+   * pick (id order = pick order). Derives from the on-field set, never the whole
+   * squad — a benched best-arm cannot bowl (M8).
+   */
+  private defaultPitcherFromIds(ids: string[], side: TeamSide): string {
+    const byId = new Map(this.squads[side].map((c) => [c.id, c]));
     let best: Character | undefined;
-    for (const c of squad) if (best === undefined || c.stats.pitch > best.stats.pitch) best = c;
+    for (const id of ids) {
+      const c = byId.get(id);
+      if (c !== undefined && (best === undefined || c.stats.pitch > best.stats.pitch)) best = c;
+    }
     return best?.id ?? '';
   }
 
@@ -176,30 +201,38 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   /**
-   * (Re)build the fielding side from the drafted squads: nominated pitcher on
-   * slot 0 (the bowling square), the rest in pick order on the remaining
-   * FIELDING_POSITIONS. Called when the draft completes, at every play end
-   * (covers the fielding side changing on an innings switch / tiebreak — the
-   * pitcher resets to that side's default), on rematch and on setPitcher.
-   * Never during PLAY (callers guarantee it). No-op until the draft completes.
+   * (Re)build the fielding side from its PositioningModule layout (M8): the
+   * nominated pitcher pinned to the PITCHING_SPOT, everyone else on their
+   * (possibly custom) layout position. Called when the draft completes, at every
+   * play end (covers the fielding side changing on an innings switch / tiebreak
+   * — the pitcher resets to that side's on-field default), on rematch, on
+   * setPitcher and on reposition/substitute. Never during PLAY (callers
+   * guarantee it). No-op until the draft completes (positioning is null).
+   * The default layout equals the old M7 slot map (PositioningModule seeds
+   * FIELDING_POSITIONS in pick order), so M7 expectations hold unchanged.
    */
   private rebuildFielding(): void {
     const side = this.fieldingSide();
     const squad = this.squads[side];
-    if (squad.length === 0) return; // draft not complete yet
-    if (this.builtFieldingSide !== side) {
-      this.pitcherId = this.defaultPitcherId(squad);
+    const layout = this.positioning?.[side].view();
+    if (layout === undefined || squad.length === 0) return; // draft not complete yet
+    if (this.builtFieldingSide !== side || !layout.onField.includes(this.pitcherId)) {
+      // Side changed (or the nominee is no longer on the field — defensive; the
+      // substitute handler re-derives eagerly): the on-field best arm bowls.
+      this.pitcherId = this.defaultPitcherFromIds(layout.onField, side);
       this.builtFieldingSide = side;
     }
-    const ordered = [
-      ...squad.filter((c) => c.id === this.pitcherId),
-      ...squad.filter((c) => c.id !== this.pitcherId),
-    ];
-    const setup: FielderSetup[] = ordered.slice(0, FIELD.FIELDING_POSITIONS.length).map((character, i) => {
-      const position = FIELD.FIELDING_POSITIONS[i];
-      if (position === undefined) throw new RangeError(`no fielding slot ${i}`);
-      return { character, position };
+    const byId = new Map(squad.map((c) => [c.id, c]));
+    const setup: FielderSetup[] = layout.onField.map((id) => {
+      const character = byId.get(id);
+      const custom = layout.positions[id];
+      if (character === undefined || custom === undefined) throw new Error(`positioning out of sync for ${id}`);
+      const position = id === this.pitcherId ? FIELD.PITCHING_SPOT : custom;
+      return { character, position, stamina: this.staminaById.get(id) ?? character.stats.stamina };
     });
+    // Pitcher first (setup order = catch tie-break order, M7 convention);
+    // Array.prototype.sort is stable, so the non-pitcher pick order is preserved.
+    setup.sort((a, b) => (a.character.id === this.pitcherId ? -1 : b.character.id === this.pitcherId ? 1 : 0));
     this.fielding = createFieldingModule(setup, this.fieldingDeps());
     this.state.fielders.clear();
     this.state.currentPitcherId = this.pitcherId;
@@ -229,6 +262,12 @@ export class MatchRoom extends Room<MatchState> {
       isFiniteNumber(options.reconnectGraceS) && options.reconnectGraceS > 0
         ? options.reconnectGraceS
         : GAME.RECONNECT_GRACE_S;
+    // Test-only field-slot override, runtime-validated like `seed` (wire-reachable).
+    const slotsOpt = options.fieldSlotsOverride;
+    this.fieldSlots =
+      typeof slotsOpt === 'number' && Number.isInteger(slotsOpt) && slotsOpt > 0 && slotsOpt <= FIELD.FIELDING_POSITIONS.length
+        ? slotsOpt
+        : FIELD.FIELDING_POSITIONS.length;
     this.physics = await createPhysicsModule();
 
     // Placeholder mirror-roster squads so the rules view is coherent pre-draft;
@@ -255,6 +294,9 @@ export class MatchRoom extends Room<MatchState> {
     this.onMessage('setPitcher', (client, message) => this.handleSetPitcher(client, message));
     this.onMessage('swing', (client, message) => this.handleSwing(client, message));
     this.onMessage('runDecision', (client, message) => this.handleRunDecision(client, message));
+    this.onMessage('reposition', (client, message) => this.handleReposition(client, message));
+    this.onMessage('substitute', (client, message) => this.handleSubstitute(client, message));
+    this.onMessage('setBatter', (client, message) => this.handleSetBatter(client, message));
     this.onMessage('confirmPositioning', (client) => this.handleConfirmPositioning(client));
     this.onMessage('readyForPlay', (client) => this.handleReadyForPlay(client));
     this.onMessage('rematch', (client) => this.handleRematch(client));
@@ -406,9 +448,18 @@ export class MatchRoom extends Room<MatchState> {
     if (this.draft.view().complete) {
       const squads = this.draft.squads();
       this.squads = { A: squads.squadA, B: squads.squadB };
+      // M8: per-side positioning state (layouts, bench, subs) and the cross-play
+      // stamina ledger, seeded at stat for every drafted character.
+      this.positioning = {
+        A: createPositioningModule(squads.squadA, this.fieldSlots),
+        B: createPositioningModule(squads.squadB, this.fieldSlots),
+      };
+      this.staminaById.clear();
+      for (const c of [...squads.squadA, ...squads.squadB]) this.staminaById.set(c.id, c.stats.stamina);
       this.rules.completeDraft(squads); // DRAFT → INITIAL_POSITIONING, real batting orders in
       this.rebuildFielding(); // innings 1: side B fields with its default pitcher
       this.syncRulesView();
+      this.syncPositioning();
     }
   }
 
@@ -432,8 +483,112 @@ export class MatchRoom extends Room<MatchState> {
       this.reject(client, 'setPitcher', 'not in your squad');
       return;
     }
+    // M8: a benched character cannot bowl — the nominee must be on the field
+    // (rebuildFielding pins the pitcher from the layout's on-field set).
+    const layout = this.positioning?.[this.fieldingSide()].view();
+    if (layout !== undefined && !layout.onField.includes(m.id)) {
+      this.reject(client, 'setPitcher', 'benched — substitute them on before nominating');
+      return;
+    }
     this.pitcherId = m.id;
     this.rebuildFielding();
+  }
+
+  // ---- M8 positioning handlers -----------------------------------------------
+
+  private handleReposition(client: Client, message: unknown): void {
+    if (this.state.paused) {
+      this.reject(client, 'reposition', 'paused');
+      return;
+    }
+    const phase = this.phase();
+    if (phase !== 'INITIAL_POSITIONING' && phase !== 'PRE_PLAY') {
+      this.reject(client, 'reposition', `only allowed in INITIAL_POSITIONING or PRE_PLAY (phase ${phase})`);
+      return;
+    }
+    if (this.sideOf(client) !== this.fieldingSide()) {
+      this.reject(client, 'reposition', 'wrongRole');
+      return;
+    }
+    const m = asRecord(message) as Partial<RepositionInput>;
+    if (typeof m.id !== 'string' || !isFiniteNumber(m.x) || !isFiniteNumber(m.z)) {
+      this.reject(client, 'reposition', 'malformed input');
+      return;
+    }
+    if (m.id === this.pitcherId) {
+      this.reject(client, 'reposition', 'the pitcher moves via setPitcher');
+      return;
+    }
+    const pos = this.positioning?.[this.fieldingSide()];
+    if (pos === undefined || !pos.reposition(m.id, m.x, m.z)) {
+      this.reject(client, 'reposition', 'illegal spot or not an on-field fielder');
+      return;
+    }
+    this.rebuildFielding();
+    this.syncPositioning();
+  }
+
+  private handleSubstitute(client: Client, message: unknown): void {
+    if (this.state.paused) {
+      this.reject(client, 'substitute', 'paused');
+      return;
+    }
+    const phase = this.phase();
+    if (phase !== 'INITIAL_POSITIONING' && phase !== 'PRE_PLAY') {
+      this.reject(client, 'substitute', `only allowed in INITIAL_POSITIONING or PRE_PLAY (phase ${phase})`);
+      return;
+    }
+    if (this.sideOf(client) !== this.fieldingSide()) {
+      this.reject(client, 'substitute', 'wrongRole');
+      return;
+    }
+    const m = asRecord(message) as Partial<SubstituteInput>;
+    if (typeof m.outId !== 'string' || typeof m.inId !== 'string') {
+      this.reject(client, 'substitute', 'malformed input');
+      return;
+    }
+    const side = this.fieldingSide();
+    const pos = this.positioning?.[side];
+    if (pos === undefined || !pos.substitute(m.outId, m.inId)) {
+      this.reject(client, 'substitute', 'not a legal substitution (bench membership or cap)');
+      return;
+    }
+    if (m.outId === this.pitcherId) {
+      // The bowler left the field: the new on-field set's best arm takes over.
+      this.pitcherId = this.defaultPitcherFromIds(pos.view().onField, side);
+    }
+    this.rebuildFielding();
+    this.syncPositioning();
+  }
+
+  private handleSetBatter(client: Client, message: unknown): void {
+    if (this.state.paused) {
+      this.reject(client, 'setBatter', 'paused');
+      return;
+    }
+    const phase = this.phase();
+    if (phase !== 'INITIAL_POSITIONING' && phase !== 'PRE_PLAY') {
+      this.reject(client, 'setBatter', `only allowed in INITIAL_POSITIONING or PRE_PLAY (phase ${phase})`);
+      return;
+    }
+    if (this.sideOf(client) !== this.rules.view().battingSide) {
+      this.reject(client, 'setBatter', 'wrongRole');
+      return;
+    }
+    const m = asRecord(message) as Partial<SetBatterInput>;
+    if (typeof m.id !== 'string' || !this.rules.setNextBatter(m.id)) {
+      // In TIEBREAK the queue is empty by design (fixed sudden-death rotation),
+      // so setNextBatter always returns false and this prose reason fires.
+      this.reject(
+        client,
+        'setBatter',
+        this.rules.view().tiebreak
+          ? 'not in the batting queue (the tiebreak rotation is fixed)'
+          : 'not in the batting queue',
+      );
+      return;
+    }
+    this.syncRulesView();
   }
 
   private handlePitch(client: Client, message: unknown): void {
@@ -597,10 +752,20 @@ export class MatchRoom extends Room<MatchState> {
     // Fresh match: clear runners (innings/rematch is the only running.reset seam),
     // the innings-1 fielding side rebuilt with its default pitcher (the null
     // builtFieldingSide forces the pitcher re-derivation), ball parked, all
-    // latches cleared. The draft is NOT re-run — squads persist across a rematch.
+    // latches cleared. The draft is NOT re-run — squads persist across a rematch,
+    // but positioning state and the stamina ledger start fresh (spec defaults).
     this.running.reset();
+    if (this.squads.A.length > 0 && this.squads.B.length > 0) {
+      this.positioning = {
+        A: createPositioningModule(this.squads.A, this.fieldSlots),
+        B: createPositioningModule(this.squads.B, this.fieldSlots),
+      };
+      this.staminaById.clear();
+      for (const c of [...this.squads.A, ...this.squads.B]) this.staminaById.set(c.id, c.stats.stamina);
+    }
     this.builtFieldingSide = null;
     this.rebuildFielding();
+    this.syncPositioning();
     this.physics.spawnBall();
     this.state.ballLive = false;
     this.contactMade = false;
@@ -777,6 +942,17 @@ export class MatchRoom extends Room<MatchState> {
    * game over) — otherwise parked survivors persist into the next play.
    */
   private endPlay(resolved: Resolved): void {
+    // M8 stamina ledger: absorb the played module's drained values FIRST (the
+    // fielding state is still the module that just played), then everyone NOT on
+    // the fielding field regains bench stamina, capped at stat (spec §4).
+    for (const f of this.fielding.getFielders()) this.staminaById.set(f.id, f.stamina);
+    const onField = new Set(this.fielding.getFielders().map((f) => f.id));
+    for (const [id, s] of this.staminaById) {
+      if (onField.has(id)) continue;
+      const stat = getCharacter(id).stats.stamina;
+      this.staminaById.set(id, Math.min(stat, s + GAME.BENCH_STAMINA_REGEN));
+    }
+
     if (resolved.outRunnerId !== null && resolved.outRunnerId !== '') {
       this.running.markOut(resolved.outRunnerId);
     }
@@ -810,6 +986,12 @@ export class MatchRoom extends Room<MatchState> {
     const v = this.rules.view();
     if (v.phase === 'GAME_OVER' || v.inningsIndex !== prevInnings || v.tiebreak) {
       this.running.reset(); // innings switch / tiebreak / game over: no parked carry-over
+    }
+    if (v.inningsIndex !== prevInnings) {
+      // Substitution caps are per innings (spec §4); layouts and bench persist.
+      this.positioning?.A.resetSubs();
+      this.positioning?.B.resetSubs();
+      this.syncPositioning();
     }
     this.syncRulesView();
     this.syncRunners();
@@ -847,6 +1029,19 @@ export class MatchRoom extends Room<MatchState> {
     this.state.currentBatterId = v.currentBatterId ?? '';
     this.state.tiebreak = v.tiebreak;
     this.state.winner = v.winner ?? '';
+    // M8: the batting side's remaining queue (changes at every play resolution too).
+    this.state.queueIds.splice(0, this.state.queueIds.length, ...v.queue);
+  }
+
+  /** Mirror both PositioningModule views into the schema (bench membership + subs used). */
+  private syncPositioning(): void {
+    if (this.positioning === null) return;
+    const a = this.positioning.A.view();
+    const b = this.positioning.B.view();
+    this.state.benchA.splice(0, this.state.benchA.length, ...a.bench);
+    this.state.benchB.splice(0, this.state.benchB.length, ...b.bench);
+    this.state.subsUsedA = a.subsUsed;
+    this.state.subsUsedB = b.subsUsed;
   }
 
   private syncFielders(): void {
