@@ -4,47 +4,27 @@ import {
   CONST,
   createRng,
   getCharacter,
+  type Character,
+  type DraftPickInput,
   type FielderSetup,
   type MatchPhase,
   type PitchInput,
   type PlayOutcome,
   type RunDecisionInput,
+  type SetPitcherInput,
   type SwingInput,
   type TeamSide,
 } from '@carlquest/shared';
 import { createPhysicsModule, type PhysicsModule } from '../modules/PhysicsModule';
 import { resolvePitch } from '../modules/PitchModule';
 import { resolveSwing } from '../modules/HitModule';
-import { createFieldingModule, type FieldingEvent, type FieldingModule } from '../modules/FieldingModule';
+import { createFieldingModule, type FieldingDeps, type FieldingEvent, type FieldingModule } from '../modules/FieldingModule';
 import { createRunningModule, type RunnerView } from '../modules/RunningModule';
 import { createRulesModule } from '../modules/RulesModule';
+import { createDraftModule, picksEach } from '../modules/DraftModule';
 import { FielderSchema, MatchState, RunnerSchema } from './MatchState';
 
 const { PHYSICS, GAME, FIELD } = CONST;
-
-/**
- * M5 demo squads: BOTH sides are the full CHARACTERS table, batting order = table
- * order (a logged demo decision — the real draft lands in M7). Because the two
- * squads are the identical mirror roster, the fielding side (always the
- * NON-batting side) draws the SAME nine fielders whichever side bats, so the
- * fielding nine is fixed once here rather than recomputed per play.
- *
- * The fielding nine = the roster minus its nominal opener (CHARACTERS[0] = Carl),
- * first nine, mapped onto FIELDING_POSITIONS in slot order — so Kian (the
- * highest-pitch bowler) lands on slot 0, the bowling square. Slot-0 is the
- * pitcher for every play in the demo. Real squad selection is the M7 draft and
- * positioning is refined in M8.
- */
-const OPENER_ID = CHARACTERS[0]?.id ?? 'carl';
-const FIELDING_NINE: FielderSetup[] = CHARACTERS.filter((c) => c.id !== OPENER_ID)
-  .slice(0, FIELD.FIELDING_POSITIONS.length)
-  .map((character, i) => {
-    const position = FIELD.FIELDING_POSITIONS[i];
-    if (position === undefined) throw new RangeError(`no fielding slot ${i}`);
-    return { character, position };
-  });
-
-const PITCHER_ID = FIELDING_NINE[0]?.character.id ?? 'kian';
 
 type SwingMessage = SwingInput & { timing: number };
 
@@ -122,6 +102,15 @@ export class MatchRoom extends Room<MatchState> {
   private fielding!: FieldingModule;
   private running!: ReturnType<typeof createRunningModule>;
   private rules!: ReturnType<typeof createRulesModule>;
+  private draft!: ReturnType<typeof createDraftModule>;
+  /** Drafted squads (pick order), set when the draft completes; empty before. */
+  private squads: Record<TeamSide, Character[]> = { A: [], B: [] };
+  /** The nominated bowler for the CURRENT fielding side (default: best pitch stat). */
+  private pitcherId = '';
+  /** Fielding side the current FieldingModule was built for (pitcher resets to default on change). */
+  private builtFieldingSide: TeamSide | null = null;
+  /** Fielding rng captured once in onCreate so rebuilds reuse the same validated source. */
+  private fieldingRng!: () => number;
   private simTime = 0;
   /** Sim-time when the live ball crossed the batting-square plane; null until it does. */
   private contactTime: number | null = null;
@@ -169,6 +158,63 @@ export class MatchRoom extends Room<MatchState> {
     return this.rules.view().battingSide === 'A' ? 'B' : 'A';
   }
 
+  /** Highest pitch stat wins; ties go to the earlier pick (array order). */
+  private defaultPitcherId(squad: Character[]): string {
+    let best: Character | undefined;
+    for (const c of squad) if (best === undefined || c.stats.pitch > best.stats.pitch) best = c;
+    return best?.id ?? '';
+  }
+
+  private fieldingDeps(): FieldingDeps {
+    return {
+      rng: this.fieldingRng,
+      hasBounced: () => this.physics.hasBounced(),
+      applyThrow: (params) => this.physics.applyPitch(params),
+      holdBallAt: (pos) => this.physics.spawnBall(pos),
+      pressure: () => this.rules.pressure(this.runnersOnPosts()),
+    };
+  }
+
+  /**
+   * (Re)build the fielding side from the drafted squads: nominated pitcher on
+   * slot 0 (the bowling square), the rest in pick order on the remaining
+   * FIELDING_POSITIONS. Called when the draft completes, at every play end
+   * (covers the fielding side changing on an innings switch / tiebreak — the
+   * pitcher resets to that side's default), on rematch and on setPitcher.
+   * Never during PLAY (callers guarantee it). No-op until the draft completes.
+   */
+  private rebuildFielding(): void {
+    const side = this.fieldingSide();
+    const squad = this.squads[side];
+    if (squad.length === 0) return; // draft not complete yet
+    if (this.builtFieldingSide !== side) {
+      this.pitcherId = this.defaultPitcherId(squad);
+      this.builtFieldingSide = side;
+    }
+    const ordered = [
+      ...squad.filter((c) => c.id === this.pitcherId),
+      ...squad.filter((c) => c.id !== this.pitcherId),
+    ];
+    const setup: FielderSetup[] = ordered.slice(0, FIELD.FIELDING_POSITIONS.length).map((character, i) => {
+      const position = FIELD.FIELDING_POSITIONS[i];
+      if (position === undefined) throw new RangeError(`no fielding slot ${i}`);
+      return { character, position };
+    });
+    this.fielding = createFieldingModule(setup, this.fieldingDeps());
+    this.state.fielders.clear();
+    this.state.currentPitcherId = this.pitcherId;
+    this.syncFielders();
+  }
+
+  /** Mirror the DraftModule view into the schema (turn, pool, squads in pick order). */
+  private syncDraft(): void {
+    const v = this.draft.view();
+    this.state.draftTurn = v.turn ?? '';
+    this.state.draftRemaining.splice(0, this.state.draftRemaining.length, ...v.remainingIds);
+    this.state.squadAIds.splice(0, this.state.squadAIds.length, ...v.pickedA);
+    this.state.squadBIds.splice(0, this.state.squadBIds.length, ...v.pickedB);
+  }
+
   override async onCreate(options: MatchRoomOptions = {}): Promise<void> {
     // The room code is client-generated (filterBy matches CREATION options; a
     // server-invented code could never match a filtered join). Absent = no code
@@ -185,7 +231,8 @@ export class MatchRoom extends Room<MatchState> {
         : GAME.RECONNECT_GRACE_S;
     this.physics = await createPhysicsModule();
 
-    // Mirror-roster demo squads (both sides = full table, batting order = table order).
+    // Placeholder mirror-roster squads so the rules view is coherent pre-draft;
+    // rules.completeDraft(squads) replaces them the moment the real draft closes.
     const squadA = [...CHARACTERS];
     const squadB = [...CHARACTERS];
     this.rules = createRulesModule({ squadA, squadB });
@@ -193,22 +240,19 @@ export class MatchRoom extends Room<MatchState> {
     // Join options are wire data — validate before use (a non-function rng would
     // throw in the sim interval; a non-finite seed would poison createRng).
     const seed = isFiniteNumber(options.seed) ? options.seed : Date.now();
-    const rng = typeof options.rng === 'function' ? options.rng : createRng(seed);
-    this.fielding = createFieldingModule(FIELDING_NINE, {
-      rng,
-      hasBounced: () => this.physics.hasBounced(),
-      applyThrow: (params) => this.physics.applyPitch(params),
-      holdBallAt: (pos) => this.physics.spawnBall(pos),
-      pressure: () => this.rules.pressure(this.runnersOnPosts()),
-    });
+    this.fieldingRng = typeof options.rng === 'function' ? options.rng : createRng(seed);
+    this.fielding = createFieldingModule([], this.fieldingDeps()); // placeholder until the draft completes
+    this.draft = createDraftModule([...CHARACTERS], picksEach(CHARACTERS.length));
     this.running = createRunningModule();
 
-    this.state.currentPitcherId = PITCHER_ID;
     this.syncRulesView();
+    this.syncDraft();
     this.syncFielders();
     this.syncRunners();
 
     this.onMessage('pitch', (client, message) => this.handlePitch(client, message));
+    this.onMessage('draftPick', (client, message) => this.handleDraftPick(client, message));
+    this.onMessage('setPitcher', (client, message) => this.handleSetPitcher(client, message));
     this.onMessage('swing', (client, message) => this.handleSwing(client, message));
     this.onMessage('runDecision', (client, message) => this.handleRunDecision(client, message));
     this.onMessage('confirmPositioning', (client) => this.handleConfirmPositioning(client));
@@ -226,10 +270,9 @@ export class MatchRoom extends Room<MatchState> {
     } else if (this.state.sessionB === '') {
       this.state.sessionB = client.sessionId;
       this.state.connectedB = true;
-      // Both seats filled: leave LOBBY. DRAFT stays auto-skipped with the
-      // mirror-roster demo squads until M7.
+      // Both seats filled: leave LOBBY and rest in DRAFT until the alternating
+      // draft completes (handleDraftPick closes it via rules.completeDraft).
       this.rules.bothConnected();
-      this.rules.completeDraft();
     }
     this.syncRulesView();
   }
@@ -339,6 +382,59 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   // ---- Message handlers ------------------------------------------------------
+
+  private handleDraftPick(client: Client, message: unknown): void {
+    if (this.state.paused) {
+      this.reject(client, 'draftPick', 'paused');
+      return;
+    }
+    if (this.phase() !== 'DRAFT') {
+      this.reject(client, 'draftPick', `only allowed in DRAFT (phase ${this.phase()})`);
+      return;
+    }
+    const side = this.sideOf(client);
+    if (side === null || side !== this.draft.view().turn) {
+      this.reject(client, 'draftPick', 'wrongRole');
+      return;
+    }
+    const m = asRecord(message) as Partial<DraftPickInput>;
+    if (typeof m.id !== 'string' || !this.draft.pick(side, m.id)) {
+      this.reject(client, 'draftPick', 'unknown or already-picked character');
+      return;
+    }
+    this.syncDraft();
+    if (this.draft.view().complete) {
+      const squads = this.draft.squads();
+      this.squads = { A: squads.squadA, B: squads.squadB };
+      this.rules.completeDraft(squads); // DRAFT → INITIAL_POSITIONING, real batting orders in
+      this.rebuildFielding(); // innings 1: side B fields with its default pitcher
+      this.syncRulesView();
+    }
+  }
+
+  private handleSetPitcher(client: Client, message: unknown): void {
+    if (this.state.paused) {
+      this.reject(client, 'setPitcher', 'paused');
+      return;
+    }
+    const phase = this.phase();
+    if (phase !== 'INITIAL_POSITIONING' && phase !== 'PRE_PLAY') {
+      this.reject(client, 'setPitcher', `only allowed in INITIAL_POSITIONING or PRE_PLAY (phase ${phase})`);
+      return;
+    }
+    if (this.sideOf(client) !== this.fieldingSide()) {
+      this.reject(client, 'setPitcher', 'wrongRole');
+      return;
+    }
+    const m = asRecord(message) as Partial<SetPitcherInput>;
+    const squad = this.squads[this.fieldingSide()];
+    if (typeof m.id !== 'string' || !squad.some((c) => c.id === m.id)) {
+      this.reject(client, 'setPitcher', 'not in your squad');
+      return;
+    }
+    this.pitcherId = m.id;
+    this.rebuildFielding();
+  }
 
   private handlePitch(client: Client, message: unknown): void {
     if (this.state.paused) {
@@ -499,9 +595,12 @@ export class MatchRoom extends Room<MatchState> {
       return;
     }
     // Fresh match: clear runners (innings/rematch is the only running.reset seam),
-    // fielders back to slots, ball parked, all latches cleared.
+    // the innings-1 fielding side rebuilt with its default pitcher (the null
+    // builtFieldingSide forces the pitcher re-derivation), ball parked, all
+    // latches cleared. The draft is NOT re-run — squads persist across a rematch.
     this.running.reset();
-    this.fielding.reset();
+    this.builtFieldingSide = null;
+    this.rebuildFielding();
     this.physics.spawnBall();
     this.state.ballLive = false;
     this.contactMade = false;
@@ -715,6 +814,11 @@ export class MatchRoom extends Room<MatchState> {
     this.syncRulesView();
     this.syncRunners();
     this.syncFielders();
+    // M7: the play may have switched the fielding side (innings switch / tiebreak
+    // flip); rebuild the on-field five from the new side's squad, resetting the
+    // pitcher to that side's default. Same-side rebuilds are equivalent to the
+    // fielding.reset() above (fresh module, same setup, same nominated pitcher).
+    this.rebuildFielding();
   }
 
   // ---- Schema sync -----------------------------------------------------------

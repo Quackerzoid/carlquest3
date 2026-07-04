@@ -14,15 +14,17 @@ type TestClient = ClientRoom<MatchState>;
 const { FIELD } = CONST;
 
 /**
- * The demo fielding side, derived from the shared roster exactly as MatchRoom
- * builds it (every non-opener entry — CHARACTERS[0] is Carl — in table order, up
- * to the number of fielding slots) so this expectation cannot drift from the
- * room's own selection.
+ * The deterministic table-order draft that draftSquads (below) always produces:
+ * alternating picks straight down the CHARACTERS table (A first), picksEach(11)
+ * = 5 per side, whale undrafted. Derived from the roster so the lists cannot
+ * drift from it: A = even table indices, B = odd.
+ * A: carl, laurie, joel, jonty, joe · B: kian, josh, darcy, robbie, ricy.
  */
-const OPENER_ID = CHARACTERS[0]?.id ?? 'carl';
-const FIELDING_IDS = CHARACTERS.filter((c) => c.id !== OPENER_ID)
-  .slice(0, FIELD.FIELDING_POSITIONS.length)
-  .map((c) => c.id);
+const TABLE_IDS = CHARACTERS.map((c) => c.id);
+const DRAFTED_A = TABLE_IDS.filter((_, i) => i % 2 === 0).slice(0, 5);
+const DRAFTED_B = TABLE_IDS.filter((_, i) => i % 2 === 1).slice(0, 5);
+/** A's first pick opens the batting (batting order = pick order). */
+const OPENER_ID = DRAFTED_A[0] ?? 'carl';
 
 /** rng() that always misses every real roster's pCatch (mirrors FieldingModule.test.ts convention). */
 const ALWAYS_MISS = (): number => 0.999;
@@ -56,6 +58,25 @@ async function waitForCondition(room: TestRoom, cond: () => boolean, maxTicks = 
   throw new Error('condition not reached');
 }
 
+/**
+ * Deterministic test draft: whichever side is on turn picks the FIRST remaining
+ * id, so a fresh room drafts alternating straight down the CHARACTERS table
+ * (A: carl, laurie, joel, jonty, joe · B: kian, josh, darcy, robbie, ricy ·
+ * whale undrafted — the DRAFTED_A/DRAFTED_B constants above) and a
+ * partially-drafted room resumes from wherever it is. No-op unless the room is
+ * currently in DRAFT.
+ */
+async function draftSquads(room: TestRoom, clientA: TestClient, clientB: TestClient): Promise<void> {
+  if (room.state.phase !== 'DRAFT') return;
+  while (room.state.draftTurn !== '') {
+    const picker = room.state.draftTurn === 'A' ? clientA : clientB;
+    const before = room.state.squadAIds.length + room.state.squadBIds.length;
+    picker.send('draftPick', { id: room.state.draftRemaining[0] ?? '' });
+    await waitForCondition(room, () => room.state.squadAIds.length + room.state.squadBIds.length > before);
+  }
+  await waitForPhase(room, 'INITIAL_POSITIONING');
+}
+
 /** The client currently batting / fielding (side A bats first; innings switches flip it). */
 function battingClient(room: TestRoom, clientA: TestClient, clientB: TestClient): TestClient {
   return room.state.battingSide === 'A' ? clientA : clientB;
@@ -65,13 +86,15 @@ function fieldingClient(room: TestRoom, clientA: TestClient, clientB: TestClient
 }
 
 /**
- * Walk the phase machine to PLAY: BOTH clients confirmPositioning (INITIAL_POSITIONING →
- * PRE_PLAY) then BOTH readyForPlay (PRE_PLAY → PLAY). onJoin has already advanced the
- * room to INITIAL_POSITIONING once both are seated; this covers both the very first
- * play and the PRE_PLAY entry after a resolved play.
+ * Walk the phase machine to PLAY: run the deterministic draft if the room is
+ * resting in DRAFT (M7 — both seats filled leaves the room there), then BOTH
+ * clients confirmPositioning (INITIAL_POSITIONING → PRE_PLAY) and BOTH
+ * readyForPlay (PRE_PLAY → PLAY). Covers the very first play and the PRE_PLAY
+ * entry after a resolved play alike.
  */
 async function startPlay(room: TestRoom, clientA: TestClient, clientB: TestClient): Promise<void> {
-  if (room.state.phase === 'LOBBY') await waitForPhase(room, 'INITIAL_POSITIONING');
+  if (room.state.phase === 'LOBBY') await waitForPhase(room, 'DRAFT');
+  if (room.state.phase === 'DRAFT') await draftSquads(room, clientA, clientB);
   if (room.state.phase === 'INITIAL_POSITIONING') {
     clientA.send('confirmPositioning');
     clientB.send('confirmPositioning');
@@ -191,10 +214,12 @@ describe('MatchRoom', () => {
 
   // ---- Boot / lobby --------------------------------------------------------
 
-  it('advances to INITIAL_POSITIONING once both clients are seated (M5 draft stub)', async () => {
+  it('rests in DRAFT once both clients are seated; the completed draft advances to INITIAL_POSITIONING', async () => {
     const room = await colyseus.createRoom('match', {});
-    await connectPair(room);
-    await waitForPhase(room, 'INITIAL_POSITIONING');
+    const { clientA, clientB } = await connectPair(room);
+    await waitForPhase(room, 'DRAFT');
+    expect(room.state.currentPitcherId).toBe(''); // no fielding side until the draft completes
+    await draftSquads(room, clientA, clientB);
     expect(room.state.phase).toBe('INITIAL_POSITIONING');
     // The rules view is mirrored into the schema from the first frame.
     expect(room.state.battingSide).toBe('A');
@@ -202,10 +227,17 @@ describe('MatchRoom', () => {
     expect(room.state.currentPitcherId).toBe('kian');
   });
 
-  it('fielders start at their FIELDING_POSITIONS slots (9 fielders, kian on the bowler slot)', async () => {
+  it('the drafted five field at the first FIELDING_POSITIONS slots (default pitcher on the bowler slot)', async () => {
     const room = await colyseus.createRoom('match', {});
-    expect(room.state.fielders.size).toBe(9);
-    FIELDING_IDS.forEach((id, i) => {
+    expect(room.state.fielders.size).toBe(0); // no fielders until the draft completes
+    const { clientA, clientB } = await connectPair(room);
+    await waitForPhase(room, 'DRAFT');
+    await draftSquads(room, clientA, clientB);
+    expect(room.state.fielders.size).toBe(5);
+    // kian (B's default pitcher — best pitch stat, tie to the earlier pick) takes
+    // slot 0, the bowling square; the rest follow in pick order on slots 1–4.
+    const onField = ['kian', ...DRAFTED_B.filter((id) => id !== 'kian')];
+    onField.forEach((id, i) => {
       const f = room.state.fielders.get(id);
       const slot = FIELD.FIELDING_POSITIONS[i];
       expect(f).toBeDefined();
@@ -223,6 +255,8 @@ describe('MatchRoom', () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
     const { clientA, clientB } = await connectPair(room);
 
+    await waitForPhase(room, 'DRAFT');
+    await draftSquads(room, clientA, clientB);
     await waitForPhase(room, 'INITIAL_POSITIONING');
     clientA.send('confirmPositioning');
     clientB.send('confirmPositioning');
@@ -519,7 +553,7 @@ describe('MatchRoom', () => {
     await room.waitForNextSimulationTick();
 
     expect(res.cause.kind).toBe('caught');
-    expect(FIELDING_IDS).toContain((res.cause as Extract<PlayOutcome, { kind: 'caught' }>).by);
+    expect(DRAFTED_B).toContain((res.cause as Extract<PlayOutcome, { kind: 'caught' }>).by);
     expect(res.outs).toContain('carl'); // caught batter is out
     expect(room.state.ballLive).toBe(false);
     expect(received).toEqual(res);
@@ -588,13 +622,16 @@ describe('MatchRoom', () => {
       expect(r?.reason.length).toBeGreaterThan(0);
     }
 
+    await waitForPhase(room, 'DRAFT');
+    await draftSquads(room, clientA, clientB);
     await waitForPhase(room, 'INITIAL_POSITIONING');
-    // In INITIAL_POSITIONING: pitch/swing/runDecision/readyForPlay/rematch all illegal
-    // (phase check runs before the role check, so the out-of-phase reason wins
-    // regardless of which client sends).
+    // In INITIAL_POSITIONING: pitch/swing/runDecision/readyForPlay/rematch/draftPick
+    // all illegal (phase check runs before the role check, so the out-of-phase
+    // reason wins regardless of which client sends).
     await expectReject(() => clientA.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 }), 'pitch', 'INITIAL_POSITIONING');
     await expectReject(() => clientA.send('readyForPlay'), 'readyForPlay', 'INITIAL_POSITIONING');
     await expectReject(() => clientA.send('rematch'), 'rematch', 'INITIAL_POSITIONING');
+    await expectReject(() => clientA.send('draftPick', { id: 'whale' }), 'draftPick', 'INITIAL_POSITIONING');
 
     clientA.send('confirmPositioning');
     clientB.send('confirmPositioning');
@@ -606,11 +643,12 @@ describe('MatchRoom', () => {
     clientA.send('readyForPlay');
     clientB.send('readyForPlay');
     await waitForPhase(room, 'PLAY');
-    // In PLAY: readyForPlay/confirmPositioning/rematch illegal; a payload-less
-    // pitch from the FIELDING side (clientB — side A bats first) is malformed,
-    // not wrongRole.
+    // In PLAY: readyForPlay/confirmPositioning/rematch/setPitcher illegal; a
+    // payload-less pitch from the FIELDING side (clientB — side A bats first)
+    // is malformed, not wrongRole.
     await expectReject(() => clientA.send('readyForPlay'), 'readyForPlay', 'PLAY');
     await expectReject(() => clientA.send('rematch'), 'rematch', 'PLAY');
+    await expectReject(() => fieldingClient(room, clientA, clientB).send('setPitcher', { id: 'kian' }), 'setPitcher', 'PLAY', rejectsB);
     await expectReject(() => fieldingClient(room, clientA, clientB).send('pitch'), 'pitch', 'PLAY', rejectsB);
   }, 20000);
 
@@ -780,6 +818,94 @@ describe('MatchRoom', () => {
     expect(uncaught).toEqual([]);
   }, 30000);
 
+  // ---- M7: draft & setPitcher ------------------------------------------------
+
+  describe('M7 draft', () => {
+    it('rests in DRAFT after both join, alternates picks A first, and completes to INITIAL_POSITIONING', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      expect(room.state.draftTurn).toBe('A');
+      expect(room.state.draftRemaining.length).toBe(CHARACTERS.length);
+      // Out of turn: B may not open the draft.
+      clientB.send('draftPick', { id: 'kian' });
+      await waitForCondition(room, () => room.state.lastRejection !== '');
+      expect(JSON.parse(room.state.lastRejection).reason).toBe('wrongRole');
+      await draftSquads(room, clientA, clientB);
+      expect([...room.state.squadAIds]).toEqual(['carl', 'laurie', 'joel', 'jonty', 'joe']);
+      expect([...room.state.squadBIds]).toEqual(['kian', 'josh', 'darcy', 'robbie', 'ricy']);
+      expect([...room.state.draftRemaining]).toEqual(['whale']);
+      expect(room.state.draftTurn).toBe('');
+      expect(room.state.currentPitcherId).toBe('kian'); // B fields first; highest pitch, tie → earlier pick
+      expect(room.state.fielders.size).toBe(5); // the drafted five, not the M5 mirror nine
+    });
+
+    it('rejects a taken pick, then resumes cleanly; picks outside DRAFT are rejected', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      clientA.send('draftPick', { id: 'carl' });
+      await waitForCondition(room, () => room.state.squadAIds.length === 1);
+      clientB.send('draftPick', { id: 'carl' }); // taken
+      await waitForCondition(room, () => room.state.lastRejection.includes('draftPick'));
+      expect(JSON.parse(room.state.lastRejection).reason).not.toBe('wrongRole'); // prose reason, right role
+      expect(room.state.draftTurn).toBe('B'); // a failed pick does not burn the turn
+      await draftSquads(room, clientA, clientB); // resumes from the partial state
+      expect(room.state.phase).toBe('INITIAL_POSITIONING');
+      expect([...room.state.squadAIds]).toEqual(['carl', 'laurie', 'joel', 'jonty', 'joe']);
+      expect([...room.state.squadBIds]).toEqual(['kian', 'josh', 'darcy', 'robbie', 'ricy']);
+      clientA.send('draftPick', { id: 'whale' }); // outside DRAFT
+      await waitForCondition(room, () => room.state.lastRejection.includes('only allowed in DRAFT'));
+    });
+
+    it('setPitcher: fielding side re-slots its bowler; batting side and PLAY-phase attempts rejected', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      await draftSquads(room, clientA, clientB);
+      // A bats first, so B is the fielding side in INITIAL_POSITIONING.
+      clientA.send('setPitcher', { id: 'joel' });
+      await waitForCondition(room, () => room.state.lastRejection.includes('setPitcher'));
+      expect(JSON.parse(room.state.lastRejection).reason).toBe('wrongRole');
+      clientB.send('setPitcher', { id: 'ricy' });
+      await waitForCondition(room, () => room.state.currentPitcherId === 'ricy');
+      const ricy = room.state.fielders.get('ricy');
+      expect(ricy?.x).toBe(FIELD.FIELDING_POSITIONS[0]?.x); // nominee took the bowling square
+      expect(ricy?.z).toBe(FIELD.FIELDING_POSITIONS[0]?.z);
+      clientB.send('setPitcher', { id: 'carl' }); // not in B's squad
+      await waitForCondition(room, () => JSON.parse(room.state.lastRejection).reason !== 'wrongRole');
+      expect(JSON.parse(room.state.lastRejection).reason).toBe('not in your squad');
+      await startPlay(room, clientA, clientB);
+      clientB.send('setPitcher', { id: 'kian' }); // positions locked in PLAY
+      await waitForCondition(room, () => room.state.lastRejection.includes('only allowed'));
+      expect(room.state.currentPitcherId).toBe('ricy');
+    }, 20000);
+
+    it('after an innings switch the OTHER five field with THEIR default pitcher', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_CATCH });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      await draftSquads(room, clientA, clientB);
+      // ALWAYS_CATCH + a flat drive straight at the bowler: caught pre-bounce
+      // every play (the same deterministic idiom as the caught-out tests — a
+      // LOFTED midfield hit would instead land in the now-unmanned deep field,
+      // be gathered post-bounce, and park batters safe indefinitely), so A's
+      // 5-batter queue drains in 5 outs and battingSide flips to 'B'.
+      let plays = 0;
+      while (room.state.battingSide === 'A' && room.state.phase !== 'GAME_OVER' && plays < 8) {
+        await startPlay(room, clientA, clientB);
+        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
+        await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
+        plays += 1;
+      }
+      expect(plays).toBe(5); // one caught batter per play, no re-queues
+      expect(room.state.battingSide).toBe('B');
+      expect(room.state.currentPitcherId).toBe('joel'); // A fields now; joel has A's best arm (pitch 9)
+      expect(room.state.fielders.size).toBe(5);
+      expect([...room.state.fielders.keys()].sort()).toEqual(['carl', 'joe', 'joel', 'jonty', 'laurie']);
+    }, 60000);
+  });
+
   // ---- M6: role gating -------------------------------------------------------
 
   describe('M6 role gating', () => {
@@ -831,6 +957,8 @@ describe('MatchRoom', () => {
     it('requires BOTH sides to confirm positioning and ready up (duplicates idempotent)', async () => {
       const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
       const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      await draftSquads(room, clientA, clientB);
       await waitForPhase(room, 'INITIAL_POSITIONING');
       clientA.send('confirmPositioning');
       clientA.send('confirmPositioning'); // duplicate: accepted, no transition, no rejection
@@ -861,7 +989,7 @@ describe('MatchRoom', () => {
 
       const clientB = await colyseus.connectTo(room);
       await awaitClientState(clientB);
-      await waitForPhase(room, 'INITIAL_POSITIONING');
+      await waitForPhase(room, 'DRAFT'); // M7: the second seat opens the draft, not positioning
       expect(room.state.sessionB).toBe(clientB.sessionId);
       expect(room.state.connectedA).toBe(true);
       expect(room.state.connectedB).toBe(true);

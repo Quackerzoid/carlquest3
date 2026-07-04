@@ -1,4 +1,4 @@
-import { MapSchema, Schema, type } from '@colyseus/schema';
+import { ArraySchema, MapSchema, Schema, type } from '@colyseus/schema';
 import type { MatchPhase } from '@carlquest/shared';
 
 export class BallSchema extends Schema {
@@ -81,6 +81,15 @@ export class MatchState extends Schema {
    * server state reliably (the broadcast is also sent to clients). '' initially.
    */
   @type('string') lastRejection = '';
+
+  // --- M7 draft ---------------------------------------------------------------
+  /** Side to pick next during DRAFT ('A'|'B'); '' once complete / before DRAFT. */
+  @type('string') draftTurn = '';
+  /** Unpicked character ids (pool order); after the draft these are the undrafted leftovers. */
+  @type(['string']) draftRemaining = new ArraySchema<string>();
+  /** Drafted squads in pick order (= batting order), populated per pick. */
+  @type(['string']) squadAIds = new ArraySchema<string>();
+  @type(['string']) squadBIds = new ArraySchema<string>();
 
   // --- M6 seats & room code -------------------------------------------------
   /** 4-letter room code from the creation options ('' if created without one, e.g. tests). */
