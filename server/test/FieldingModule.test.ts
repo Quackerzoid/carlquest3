@@ -1,6 +1,15 @@
+/**
+ * rng call-count CONTRACT (M4, extended M9): exactly ONE pCatch roll per
+ * catch-radius entry (the entry latch suppresses re-rolls while inside),
+ * EXCEPT: a guaranteed attempt (IMMOVABLE) makes NO pCatch roll at all; and a
+ * fielder with fumbleChance > 0 (BUTTERFINGERS) makes ONE EXTRA fumble roll
+ * immediately after a won (or guaranteed) attempt — fumbleChance = 0 fielders
+ * never make that extra call, so neutral call counts are unchanged from M4.
+ */
 import { describe, expect, it } from 'vitest';
 import {
   CONST,
+  catchRadius,
   getCharacter,
   moveSpeed,
   fatigueMult,
@@ -22,9 +31,9 @@ import {
 const { FIELD, GAME, PHYSICS } = CONST;
 const DT = PHYSICS.FIXED_TIMESTEP;
 
-const carl = getCharacter('carl'); // speed 7, reach 6, pitch 5, stamina 7, instinct 6, reflex 6 → pCatch 0.72 - penalty
-const josh = getCharacter('josh'); // speed 8, reach 7, stamina 7
-const joe = getCharacter('joe'); // speed 2, stamina 3 — fatigues immediately
+const carl = getCharacter('carl'); // speed 7, reach 6, pitch 5, stamina 7, instinct 6, reflex 6 → pCatch 0.72 - penalty; CLUTCH_SWING = neutral for fielding
+const josh = getCharacter('josh'); // speed 8, reach 7, stamina 7; QUICK_DRAW (halved release delay, M9)
+const joe = getCharacter('joe'); // speed 2, stamina 3 — fatigues immediately; BUTTERFINGERS (fumble roll, M9)
 
 const vec = (x: number, y: number, z: number): Vec3 => ({ x, y, z });
 const zero = vec(0, 0, 0);
@@ -440,5 +449,224 @@ describe('stamina seed (M8 ledger)', () => {
     m.tick(DT, rolling(50, 50), true, null);
     m.reset();
     expect(view(m).stamina).toBe(carl.stats.stamina);
+  });
+});
+
+describe('abilities (M9)', () => {
+  const jonty = getCharacter('jonty'); // IMMOVABLE — guaranteed catch, NO pCatch roll
+  const laurie = getCharacter('laurie'); // LONG_REACH — reach 9; ×1.4 radius while stationary only
+  const ricy = getCharacter('ricy'); // POWERHOUSE — reach 8, speed 7 (same as carl); +0.5 m radius, no fatigue while stamina ≥ 2
+  const { ABILITY } = CONST;
+
+  /**
+   * An airborne ball at hands height, horizontal distance d from a fielder
+   * standing at (0, 0), moving so its gravity-only landing point is exactly
+   * (0, 0): the fielder is already at the chase target (no movement → speed 0,
+   * i.e. stationary) while the ball's 3D hands→ball distance is exactly d.
+   */
+  function incomingAt(d: number): BallState {
+    const height = PHYSICS.BALL_RELEASE_HEIGHT - PHYSICS.BALL_RADIUS;
+    const t = Math.sqrt((2 * height) / -PHYSICS.GRAVITY_Y);
+    return ball(vec(d, PHYSICS.BALL_RELEASE_HEIGHT, 0), vec(-d / t, 0, 0));
+  }
+
+  it('incomingAt sanity: the constructed ball lands at the origin', () => {
+    const land = landingPoint(incomingAt(3));
+    expect(land.x).toBeCloseTo(0, 8);
+    expect(land.z).toBeCloseTo(0, 8);
+  });
+
+  it('IMMOVABLE: catches with ZERO rng calls even when every roll would miss', () => {
+    const h = makeDeps(); // default rng 0.999 — a miss for every roster pCatch
+    const m = createFieldingModule([at(jonty, 5, 5)], h.deps);
+    const event = m.tick(DT, ball(vec(5, PHYSICS.BALL_RELEASE_HEIGHT, 5)), true, null);
+    expect(event).toEqual({ kind: 'caught', by: 'jonty' });
+    expect(m.holderId()).toBe('jonty');
+    expect(h.rngCallCount()).toBe(0); // guaranteed: the pCatch roll is skipped entirely
+  });
+
+  describe('LONG_REACH', () => {
+    const base = catchRadius(laurie.stats.reach);
+    const d = base * 1.2; // strictly between the base radius and the stationary radius
+
+    it('sanity: 1.2× base sits strictly inside the LONG_REACH stationary radius', () => {
+      expect(d).toBeGreaterThan(base);
+      expect(d).toBeLessThan(base * ABILITY.LONG_REACH_RADIUS_MULT);
+    });
+
+    it('a STATIONARY fielder catches at 1.2× the base radius (exactly one roll)', () => {
+      const h = makeDeps([0]);
+      const m = createFieldingModule([at(laurie, 0, 0)], h.deps);
+      const event = m.tick(DT, incomingAt(d), true, null);
+      expect(event).toEqual({ kind: 'caught', by: 'laurie' });
+      expect(h.rngCallCount()).toBe(1); // LONG_REACH is not guaranteed: normal one-roll contract
+    });
+
+    it('the SAME hands→ball distance is out of reach mid-chase (multiplier is stationary-only)', () => {
+      const h = makeDeps([0]);
+      const start = 1.2;
+      // She chases the landing point (0, 0) this tick; place the ball so that
+      // AFTER the move the hands→ball distance is exactly d.
+      const travel = moveSpeed(laurie.stats.speed, fatigueMult(laurie.stats.stamina)) * DT;
+      const postMoveX = start - travel;
+      const m = createFieldingModule([at(laurie, start, 0)], h.deps);
+      const event = m.tick(DT, incomingAt(postMoveX + d), true, null);
+      expect(event).toBeNull();
+      expect(h.rngCallCount()).toBe(0); // outside the un-multiplied radius: no entry, no roll
+      expect(view(m).x).toBeCloseTo(postMoveX, 8); // sanity: she really was mid-chase this tick
+    });
+  });
+
+  describe('POWERHOUSE', () => {
+    const base = catchRadius(ricy.stats.reach);
+
+    it('sanity: the probe distances straddle the +0.5 m bonus ring', () => {
+      expect(0.25).toBeLessThan(ABILITY.POWERHOUSE_RADIUS_BONUS_M);
+      expect(0.6).toBeGreaterThan(ABILITY.POWERHOUSE_RADIUS_BONUS_M);
+    });
+
+    it('+0.5 m additive radius: inside the bonus ring rolls once and catches', () => {
+      const h = makeDeps([0]);
+      const m = createFieldingModule([at(ricy, 0, 0)], h.deps);
+      const event = m.tick(DT, incomingAt(base + 0.25), true, null);
+      expect(event).toEqual({ kind: 'caught', by: 'ricy' });
+      expect(h.rngCallCount()).toBe(1);
+    });
+
+    it('beyond base + bonus there is no attempt at all', () => {
+      const h = makeDeps([0]);
+      const m = createFieldingModule([at(ricy, 0, 0)], h.deps);
+      const event = m.tick(DT, incomingAt(base + 0.6), true, null);
+      expect(event).toBeNull();
+      expect(h.rngCallCount()).toBe(0);
+    });
+
+    it('fatigueMult is forced to 1 while stamina ≥ the floor; a same-speed neutral fielder is slower', () => {
+      expect(ricy.stats.speed).toBe(carl.stats.speed); // same speed stat → like-for-like advance
+      expect(2.5).toBeGreaterThanOrEqual(ABILITY.POWERHOUSE_FATIGUE_FLOOR);
+      expect(fatigueMult(2.5)).toBeLessThan(1); // the neutral fielder is genuinely fatigued at 2.5
+      const mR = createFieldingModule([{ ...at(ricy, 0, 0), stamina: 2.5 }], makeDeps().deps);
+      const mC = createFieldingModule([{ ...at(carl, 0, 0), stamina: 2.5 }], makeDeps().deps);
+      mR.tick(DT, rolling(1000, 0), true, null);
+      mC.tick(DT, rolling(1000, 0), true, null);
+      expect(view(mR).x).toBeCloseTo(moveSpeed(ricy.stats.speed, 1) * DT, 10);
+      expect(view(mC).x).toBeCloseTo(moveSpeed(carl.stats.speed, fatigueMult(2.5)) * DT, 10);
+      expect(view(mR).x).toBeGreaterThan(view(mC).x);
+    });
+
+    it('below the floor normal fatigue resumes', () => {
+      expect(1.5).toBeLessThan(ABILITY.POWERHOUSE_FATIGUE_FLOOR);
+      const m = createFieldingModule([{ ...at(ricy, 0, 0), stamina: 1.5 }], makeDeps().deps);
+      m.tick(DT, rolling(1000, 0), true, null);
+      expect(view(m).x).toBeCloseTo(moveSpeed(ricy.stats.speed, fatigueMult(1.5)) * DT, 10);
+    });
+  });
+
+  describe('QUICK_DRAW', () => {
+    it('releases the throw at HALF the neutral delay', () => {
+      const HANDS = vec(5, PHYSICS.BALL_RELEASE_HEIGHT, 5);
+      const h = makeDeps([0]);
+      const m = createFieldingModule([at(josh, 5, 5)], h.deps);
+      expect(m.tick(DT, ball(HANDS), true, null)).toEqual({ kind: 'caught', by: 'josh' });
+      const halved = GAME.THROW_RELEASE_DELAY_S * ABILITY.QUICK_DRAW_DELAY_MULT;
+      expect(halved).toBeLessThan(GAME.THROW_RELEASE_DELAY_S); // a neutral holder would still be holding
+      // Two half-delay ticks (0.125 s each — exact in binary): the first is
+      // still short of the halved delay, the second reaches it exactly.
+      expect(m.tick(halved / 2, ball(HANDS), true, 2)).toBeNull();
+      expect(m.tick(halved / 2, ball(HANDS), true, 2)).toEqual({
+        kind: 'thrown',
+        by: 'josh',
+        atPost: 2,
+      });
+      expect(h.throws).toHaveLength(1);
+    });
+  });
+
+  describe('BUTTERFINGERS', () => {
+    // joe's rng contract per radius entry is [pCatch roll, fumble roll]; the
+    // fumble roll happens ONLY after a won attempt (fumbleChance 0.35 > 0).
+    const HANDS = vec(5, PHYSICS.BALL_RELEASE_HEIGHT, 5);
+
+    it('a won roll followed by a fumble roll parks the ball at the FEET: no event, no holder', () => {
+      const h = makeDeps([0, 0]); // win pCatch, then 0 < 0.35 → fumble
+      const m = createFieldingModule([at(joe, 5, 5)], h.deps);
+      const event = m.tick(DT, ball(HANDS), true, null);
+      expect(event).toBeNull();
+      expect(m.holderId()).toBeNull();
+      expect(view(m).hasBall).toBe(false);
+      expect(h.rngCallCount()).toBe(2);
+      // Parked on the GROUND at the fielder's feet — not held at the hands.
+      expect(h.holds).toEqual([vec(5, PHYSICS.BALL_RADIUS, 5)]);
+    });
+
+    it('the fumbling fielder stays latched: no instant re-roll while the ball sits in radius', () => {
+      const h = makeDeps([0, 0]);
+      const m = createFieldingModule([at(joe, 5, 5)], h.deps);
+      m.tick(DT, ball(HANDS), true, null); // fumble (rolls 1-2)
+      const again = m.tick(DT, ball(HANDS), true, null); // ball still within joe's radius
+      expect(again).toBeNull();
+      expect(h.rngCallCount()).toBe(2); // latch held: no third roll
+    });
+
+    it('a won roll that survives the fumble roll is a normal catch (two rng calls)', () => {
+      const h = makeDeps([0, 0.999]); // win pCatch, then 0.999 ≥ 0.35 → no fumble
+      const m = createFieldingModule([at(joe, 5, 5)], h.deps);
+      const event = m.tick(DT, ball(HANDS), true, null);
+      expect(event).toEqual({ kind: 'caught', by: 'joe' });
+      expect(m.holderId()).toBe('joe');
+      expect(h.rngCallCount()).toBe(2);
+      expect(h.holds).toEqual([HANDS]); // held at the hands like any catch
+    });
+
+    it('a neutral fielder makes NO fumble roll (call count unchanged from M4)', () => {
+      const h = makeDeps([0]);
+      const m = createFieldingModule([at(carl, 5, 5)], h.deps);
+      const event = m.tick(DT, ball(HANDS), true, null);
+      expect(event).toEqual({ kind: 'caught', by: 'carl' });
+      expect(h.rngCallCount()).toBe(1); // pCatch roll only — fumbleChance 0 skips the extra call
+    });
+
+    it('a fumble ends the tick: no other fielder attempts the stale ball snapshot; the pickup next tick is GATHERED even for a guaranteed catcher', () => {
+      const h = makeDeps([0, 0]);
+      // Both radii contain the ball; joe (setup order first) wins then fumbles.
+      const m = createFieldingModule([at(joe, 5, 5), at(jonty, 5.5, 5)], h.deps);
+      const event = m.tick(DT, ball(HANDS), true, null);
+      expect(event).toBeNull(); // jonty (guaranteed) never attempts — the ball is already grounded
+      expect(m.holderId()).toBeNull();
+      expect(h.rngCallCount()).toBe(2);
+      // Next tick the parked ball (at joe's feet) is in jonty's radius: his
+      // guaranteed pickup classifies gathered — the flight was fumbled.
+      const pickup = m.tick(DT, rolling(5, 5), true, null);
+      expect(pickup).toEqual({ kind: 'gathered', by: 'jonty' });
+      expect(h.rngCallCount()).toBe(2); // guaranteed pickup: still no further rolls
+    });
+
+    it('after a fumble any later catch this flight is gathered even when hasBounced() says false (room stub coupling)', () => {
+      // The room binds holdBallAt to physics.spawnBall, whose placeBall RESETS
+      // the bounce flag — so after the fumble park, the physics reports the
+      // grounded ball as never-bounced. Couple the stubs the same way (like
+      // the M4 final-review regression test) and pin that the module's own
+      // fumbledFlight flag closes the wrongful-out trap.
+      const h = makeDeps([0, 0, 0]); // joe wins, joe fumbles, carl wins
+      const parkAndReset = h.deps.holdBallAt;
+      h.deps.holdBallAt = (p) => {
+        h.bounced.value = false; // exactly what placeBall does
+        parkAndReset(p);
+      };
+      const m = createFieldingModule([at(joe, 5, 5), at(carl, 30, 30)], h.deps);
+      expect(m.tick(DT, ball(HANDS), true, null)).toBeNull(); // fumble at joe's feet
+      expect(h.bounced.value).toBe(false); // the coupled stub genuinely reports no bounce
+      const event = m.tick(DT, ball(vec(30, PHYSICS.BALL_RELEASE_HEIGHT, 30)), true, null);
+      expect(event).toEqual({ kind: 'gathered', by: 'carl' }); // never 'caught' after a fumble
+    });
+
+    it('reset() clears the fumbled-flight flag: a fresh pre-bounce catch is caught again', () => {
+      const h = makeDeps([0, 0, 0, 0.999]);
+      const m = createFieldingModule([at(joe, 5, 5)], h.deps);
+      m.tick(DT, ball(HANDS), true, null); // fumble (rolls 1-2)
+      m.reset();
+      const event = m.tick(DT, ball(HANDS), true, null); // win, survive the fumble roll (rolls 3-4)
+      expect(event).toEqual({ kind: 'caught', by: 'joe' });
+    });
   });
 });

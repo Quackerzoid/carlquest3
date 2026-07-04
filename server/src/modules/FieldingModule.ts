@@ -10,6 +10,7 @@ import {
   approachPenalty,
   catchRadius,
   fatigueMult,
+  fieldingAbilityParams,
   moveSpeed,
   pCatch,
   pitchSpeed,
@@ -17,38 +18,16 @@ import {
   type BallState,
   type Character,
   type FielderSetup,
+  type FieldingAbilityParams,
   type PitchParams,
   type Vec3,
 } from '@carlquest/shared';
 
-const { FIELD, GAME, PHYSICS } = CONST;
+const { ABILITY, FIELD, GAME, PHYSICS } = CONST;
 
 /** Numeric guards: float accumulation slack and a degenerate-direction threshold. */
 const EPSILON = 1e-9;
 const DEGENERATE_DISTANCE = 1e-6;
-
-/**
- * Ability hooks (M9). The fields exist so the catch/throw paths already have
- * the right shape, but Milestone 4 uses only these neutral identity values —
- * no ability conditions are implemented (plan Global Constraints).
- */
-interface AbilityParams {
-  /** LONG_REACH widens the catch radius (M9). */
-  radiusMult: number;
-  /** A guaranteed catch skips the pCatch roll entirely (M9). */
-  guaranteed: boolean;
-  /** BUTTERFINGERS post-catch fumble probability (M9); 0 = never, so no fumble roll exists yet. */
-  fumbleChance: number;
-  /** QUICK_DRAW halves the gather-to-throw delay (M9). */
-  releaseDelayMult: number;
-}
-
-const NEUTRAL: AbilityParams = {
-  radiusMult: 1,
-  guaranteed: false,
-  fumbleChance: 0,
-  releaseDelayMult: 1,
-};
 
 export interface FielderView {
   id: string;
@@ -59,7 +38,12 @@ export interface FielderView {
 }
 
 export interface FieldingDeps {
-  /** Seeded rng in [0, 1) — catch rolls only; call counts are part of the contract. */
+  /**
+   * Seeded rng in [0, 1) — catch and fumble rolls only; call counts are part
+   * of the contract: one pCatch roll per radius entry, EXCEPT none for a
+   * guaranteed (IMMOVABLE) attempt, plus one extra fumble roll after a
+   * won/guaranteed attempt only when the fielder's fumbleChance > 0 (M9).
+   */
   rng: () => number;
   /** True once the ball has touched the ground this flight (caught vs gathered, spec §8). */
   hasBounced: () => boolean;
@@ -96,7 +80,7 @@ export interface FieldingModule {
   ): FieldingEvent | null;
   getFielders(): FielderView[];
   holderId(): string | null;
-  /** Back to setup positions and stat stamina; holder, hold timer and roll latches cleared. */
+  /** Back to setup positions and stat stamina; holder, hold timer, roll latches and the fumbled-flight flag cleared. */
   reset(): void;
 }
 
@@ -127,6 +111,8 @@ export function throwVelocity(from: Vec3, to: Vec3, speed: number): Vec3 | null 
 
 interface FielderState {
   readonly character: Character;
+  /** Ability params derived once at setup from the character (M9). */
+  readonly params: FieldingAbilityParams;
   /** Setup slot, restored by reset(). */
   readonly home: { x: number; z: number };
   /** Setup stamina (the M8 ledger seed; stat when unseeded), restored by reset(). */
@@ -135,6 +121,12 @@ interface FielderState {
   z: number;
   stamina: number;
   hasBall: boolean;
+  /**
+   * This tick's movement speed in m/s (last step distance / dt), zeroed at
+   * tick start for fielders nobody moves. Feeds LONG_REACH's stationary check:
+   * the widened radius applies only while speed < ABILITY.STATIONARY_SPEED_EPS.
+   */
+  speed: number;
   /**
    * Catch-roll latch: true from the tick the ball enters this fielder's catch
    * radius (below CATCH_HEIGHT_MAX) until it leaves — one pCatch roll per
@@ -149,17 +141,28 @@ interface FielderState {
 export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps): FieldingModule {
   const fielders: FielderState[] = setup.map((s) => ({
     character: s.character,
+    params: fieldingAbilityParams(s.character),
     home: { x: s.position.x, z: s.position.z },
     seedStamina: s.stamina ?? s.character.stats.stamina,
     x: s.position.x,
     z: s.position.z,
     stamina: s.stamina ?? s.character.stats.stamina,
     hasBall: false,
+    speed: 0,
     latched: false,
   }));
 
   let holder: FielderState | null = null;
   let holdTime = 0;
+  /**
+   * BUTTERFINGERS guard (M9): true from the first fumble of a flight until
+   * reset(). A fumbled ball touched the ground by definition, so any later
+   * successful catch this flight classifies gathered, never caught — the
+   * room binds holdBallAt to physics.spawnBall, whose placeBall resets the
+   * bounce flag, so deps.hasBounced() alone would report the grounded ball
+   * as never-bounced and hand out a wrongful pre-bounce out.
+   */
+  let fumbledFlight = false;
 
   /** A fielder's hands: feet position raised to ball-release height. */
   function handsOf(f: FielderState): Vec3 {
@@ -225,8 +228,11 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
     const dx = tx - f.x;
     const dz = tz - f.z;
     const dist = Math.hypot(dx, dz);
-    if (dist === 0) return;
-    const travel = moveSpeed(f.character.stats.speed, fatigueMult(f.stamina)) * dt;
+    if (dist === 0) return; // standing on the target: not sprinting, speed stays 0
+    // POWERHOUSE (M9): fatigueMult forced to 1 while stamina >= fatigueFloor.
+    // The neutral floor is Infinity, so everyone else always takes fatigueMult.
+    const fatigue = f.stamina >= f.params.fatigueFloor ? 1 : fatigueMult(f.stamina);
+    const travel = moveSpeed(f.character.stats.speed, fatigue) * dt;
     if (dist <= travel) {
       f.x = tx;
       f.z = tz;
@@ -234,12 +240,16 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
       f.x += (dx / dist) * travel;
       f.z += (dz / dist) * travel;
     }
+    f.speed = dt > 0 ? Math.min(dist, travel) / dt : 0; // this tick's actual speed (LONG_REACH)
     f.stamina = Math.max(0, f.stamina - GAME.SPRINT_STAMINA_COST_PER_S * dt);
   }
 
   return {
     tick(dt, ball, ballLive, runnerTargetPost) {
       const heldAtStart = holder !== null;
+
+      // Fielders nobody moves this tick are stationary; moveTowards overwrites.
+      for (const f of fielders) f.speed = 0;
 
       // --- Roles (re-evaluated every tick) + movement -----------------------
       if (holder === null) {
@@ -272,8 +282,17 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
         );
         for (const f of fielders) {
           if (holder !== null) break; // first catch wins; later latches freeze until next tick
+          const a = f.params;
           const hands = handsOf(f);
-          const radius = catchRadius(f.character.stats.reach) * NEUTRAL.radiusMult;
+          // Effective radius (M9): base × static mult × (LONG_REACH's mult only
+          // while this fielder is stationary), then POWERHOUSE's additive bonus
+          // AFTER the multipliers.
+          const stationary = f.speed < ABILITY.STATIONARY_SPEED_EPS;
+          const radius =
+            catchRadius(f.character.stats.reach) *
+              a.radiusMult *
+              (stationary ? a.stationaryRadiusMult : 1) +
+            a.radiusBonusM;
           const within =
             ball.position.y <= GAME.CATCH_HEIGHT_MAX &&
             Math.hypot(
@@ -289,10 +308,22 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
           f.latched = true;
           let p = pCatch(f.character.stats.instinct, f.character.stats.reflex, penalty);
           if (deps.pressure?.()) p *= pressureMult(f.character.stats.nerve);
-          // NEUTRAL.guaranteed short-circuits the roll when abilities land (M9);
-          // false today, so exactly one rng draw happens per radius entry.
-          const success = NEUTRAL.guaranteed || deps.rng() < p;
+          // IMMOVABLE (M9): a guaranteed attempt short-circuits the roll — NO
+          // rng draw; otherwise exactly one draw per radius entry (contract).
+          const success = a.guaranteed || deps.rng() < p;
           if (!success) continue;
+          // BUTTERFINGERS (M9): one EXTRA rng draw after a won (or guaranteed)
+          // attempt, only when fumbleChance > 0 — neutral counts unchanged.
+          if (a.fumbleChance > 0 && deps.rng() < a.fumbleChance) {
+            // Fumble: the ball drops dead at the fielder's FEET on the ground —
+            // parked but NOT held (no holder), so play simply continues. The
+            // entry latch stays set (no instant re-roll on the parked ball),
+            // and fumbledFlight forces every later catch this flight to
+            // classify gathered (see the flag's declaration).
+            fumbledFlight = true;
+            deps.holdBallAt({ x: f.x, y: PHYSICS.BALL_RADIUS, z: f.z });
+            break; // the ball snapshot is stale for everyone else this tick
+          }
           f.hasBall = true;
           holder = f;
           holdTime = 0;
@@ -302,9 +333,10 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
           // pickup as a pre-bounce catch (M4 final-review regression).
           const bouncedBeforePark = deps.hasBounced();
           deps.holdBallAt(hands); // park immediately so physics cannot fly the ball onwards
-          event = bouncedBeforePark
-            ? { kind: 'gathered', by: f.character.id }
-            : { kind: 'caught', by: f.character.id };
+          event =
+            bouncedBeforePark || fumbledFlight
+              ? { kind: 'gathered', by: f.character.id }
+              : { kind: 'caught', by: f.character.id };
         }
       }
 
@@ -314,7 +346,8 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
         holdTime += dt;
         const hands = handsOf(f);
         deps.holdBallAt(hands);
-        const releaseAfter = GAME.THROW_RELEASE_DELAY_S * NEUTRAL.releaseDelayMult;
+        // QUICK_DRAW (M9): the holder's own releaseDelayMult halves the delay.
+        const releaseAfter = GAME.THROW_RELEASE_DELAY_S * f.params.releaseDelayMult;
         if (runnerTargetPost !== null && holdTime >= releaseAfter - EPSILON) {
           const p = post(runnerTargetPost);
           const velocity = throwVelocity(
@@ -360,10 +393,12 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
         f.z = f.home.z;
         f.stamina = f.seedStamina;
         f.hasBall = false;
+        f.speed = 0;
         f.latched = false;
       }
       holder = null;
       holdTime = 0;
+      fumbledFlight = false;
     },
   };
 }
