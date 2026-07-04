@@ -192,6 +192,7 @@ Entry format:
 
 ### 6.4 Known Issues (keep current — remove only when fixed and verified)
 
+- Known-flake candidate (M6 final-review fix round): `MatchRoom.test.ts` › `matches a filtered join to the room with that code, and rejects a wrong code` once exceeded its bare 5 s default timeout under full-suite load (isolated run 85 ms; clean on rerun). Pre-existing matchmaker-latency coupling, not caused by the M6 changes; give it an explicit timeout if it flakes again.
 - Server test stdout is not pristine: `@colyseus/tools` prints an ".env file not found" info line, and MatchRoom onJoin/onLeave console.logs (plan-mandated) appear in Vitest output. Cosmetic; revisit when MatchRoom gains real logic.
 - `npm audit` reports 10 vulnerabilities (8 moderate, 1 high, 1 critical) as of 2026-07-03, triaged at M1 final review: critical = Vitest UI file-read/execute (UI never used, dev-only); high = Vite dev-server issues (localhost dev only); moderates = esbuild dev CORS + nanoid <3.3.8 in @colyseus/core (only runtime one; predictability condition doesn't apply to Colyseus usage). All fixes need breaking major bumps (Vite 7/8, Vitest 3, Colyseus 0.16+) — deferred deliberately; revisit at a natural upgrade point.
 - Client `SceneModule.resize()` re-applies `setPixelRatio(window.devicePixelRatio)` per resize event — reviewed and kept (catches cross-monitor DPI changes; idempotent, cheap). Not a defect; noted so it isn't re-flagged.
