@@ -89,25 +89,40 @@ export interface RunnerState {
   out: boolean;
 }
 
-export interface RunnerView {
-  /** Call once per frame with the latest authoritative runner state. */
-  update(runner: RunnerState): void;
+export interface RunnersView {
+  /** Call once per frame with the latest authoritative runner set (any iterable). */
+  update(runners: Iterable<RunnerState>): void;
 }
 
-/** Single capsule for the runner in play; hidden when there is no runner or they are out. */
-export function createRunnerView(scene: THREE.Scene): RunnerView {
-  const mesh = new THREE.Mesh(
-    createHumanGeometry(),
-    new THREE.MeshLambertMaterial({ color: 0xe8e8e8 }),
-  );
-  mesh.visible = false;
-  scene.add(mesh);
+/** Capsule per runner, keyed by character id; meshes are added/removed as runners spawn and settle (M5 multi-runner). Out runners are hidden. */
+export function createRunnersView(scene: THREE.Scene): RunnersView {
+  const material = new THREE.MeshLambertMaterial({ color: 0xe8e8e8 });
+  const meshes = new Map<string, THREE.Mesh>();
   const target = new THREE.Vector3();
+
   return {
-    update(runner) {
-      target.set(runner.x, HUMAN_EYE_HEIGHT, runner.z);
-      mesh.position.lerp(target, 0.5);
-      mesh.visible = runner.id !== '' && !runner.out;
+    update(runners) {
+      const seen = new Set<string>();
+      for (const runner of runners) {
+        seen.add(runner.id);
+        let mesh = meshes.get(runner.id);
+        if (!mesh) {
+          mesh = new THREE.Mesh(createHumanGeometry(), material);
+          mesh.position.set(runner.x, HUMAN_EYE_HEIGHT, runner.z);
+          scene.add(mesh);
+          meshes.set(runner.id, mesh);
+        }
+        target.set(runner.x, HUMAN_EYE_HEIGHT, runner.z);
+        mesh.position.lerp(target, 0.5);
+        mesh.visible = !runner.out;
+      }
+      for (const [id, mesh] of meshes) {
+        if (!seen.has(id)) {
+          scene.remove(mesh);
+          mesh.geometry.dispose();
+          meshes.delete(id);
+        }
+      }
     },
   };
 }

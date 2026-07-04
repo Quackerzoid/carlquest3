@@ -40,6 +40,23 @@ export function attachInput(net: Net, onLocalAction: (text: string) => void): In
         net.sendRunDecision({ go: false });
         onLocalAction('run: stop');
         break;
+      case 'Enter':
+        // No client-side rule logic beyond choosing which message to send —
+        // the server validates every message against its own phase anyway.
+        if (net.phase() === 'INITIAL_POSITIONING') {
+          net.sendConfirmPositioning();
+          onLocalAction('confirm positioning');
+        } else if (net.phase() === 'PRE_PLAY') {
+          net.sendReadyForPlay();
+          onLocalAction('ready for play');
+        }
+        break;
+      case 'KeyN':
+        if (net.phase() === 'GAME_OVER') {
+          net.sendRematch();
+          onLocalAction('rematch requested');
+        }
+        break;
       default:
     }
   });
