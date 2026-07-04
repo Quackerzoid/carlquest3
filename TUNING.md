@@ -53,6 +53,21 @@ elsewhere.
   auto-offset of a metre or two) rather than a rules change — any auto-placement
   invents a rule the spec doesn't give.
 
+## Milestone 9 — Abilities (introduced 2026-07-04)
+
+| Constant | Current value | Controls | Playtest watch-list |
+|----------|---------------|----------|---------------------|
+| `ABILITY.SPIN_READ_W` | `0.25` | Weight of the invented (USER-APPROVED) spin-read penalty on the swing timing window: `1 − SPIN_READ_W·s01(pitcherSpin)·|spinInput|` — SWITCH's counterpart mechanic (SWITCH batters are immune). | At 0.25 a max-spin pitch from a 10-spin bowler shrinks a batter's window by 25%. If spun pitches feel unhittable for non-SWITCH batters, lower toward 0.15; if SWITCH feels like a dead ability because spin barely matters, raise. Tune together with `CURVE_SPIN_MULT`. |
+| `ABILITY.STATIONARY_SPEED_EPS` | `0.1` (m/s) | Speed below which a fielder counts as "stationary" for LONG_REACH's 1.4× catch-radius bonus. | Pure epsilon first guess — meant to distinguish "standing at their spot" from "chasing". If LONG_REACH fielders lose the bonus from tiny approach jitters, raise slightly; if they keep it while visibly drifting, lower. |
+| `ABILITY.WALL_BLOCKER_HALF_HEIGHT` / `WALL_BLOCKER_RADIUS` | `0.9` / `0.4` (m) | Size of the whale's WALL blocker capsule (total height 2.6 m with caps) — the volume that stops a struck ball dead. | Spec is silent on size; whale-sized first guess. Too large → the whale blanks an entire corridor of the field; too small → WALL rarely triggers. Judge against how often flat drives through the whale's zone die at his feet, and tune together with the field geometry/`LEGAL_ZONE`. |
+
+- **CLUTCH-test timing headroom (~0.37 ticks).** The CLUTCH unit tests use
+  absolute swing-offset thresholds that sit only ~0.37 of a physics tick inside
+  the window edge they assert against. Deterministic today (fixed timestep,
+  fixed inputs), but retuning `TIMING_W`, reflex stats, or pitch speeds can
+  silently flip those tests before it flips gameplay — re-derive the test
+  offsets alongside any timing-window retune.
+
 ## Carried over from earlier milestones
 
 - **Max-power hit vs `PLAY_TIMEOUT_S` (M3).** A max-power 60°-elevation hit flies

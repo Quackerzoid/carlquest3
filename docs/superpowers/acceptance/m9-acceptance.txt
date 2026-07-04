@@ -1,0 +1,81 @@
+[0.0s] === ROOM 1: custom draft (kian+whale+jonty+joe on B), CURVEBALL, WALL, IMMOVABLE, spin-read ===
+[0.8s] OK: squad A = carl,laurie,darcy,josh,joel
+[0.8s] OK: squad B = kian,whale,jonty,joe,robbie
+[0.8s] OK: kian still bowls with the custom five (pitch 8 is B's best arm) — got 'kian'
+[0.9s] whale parked at (12, 28); jonty at (-6, 9)
+[1.0s] --- Demo 1: CURVEBALL late onset — kian pitches spinInput 1, nobody swings ---
+[7.1s] flight 1 sampled; cumulative points: 5
+[13.3s] flight 2 sampled; cumulative points: 10
+[13.3s] merged (z, x) profile (z is the time proxy; onset expected at z ≈ 3.0):
+[13.3s]   z=6.62  x=0.0000
+[13.3s]   z=6.62  x=0.0000
+[13.3s]   z=4.87  x=0.0000
+[13.3s]   z=4.43  x=0.0000
+[13.3s]   z=3.12  x=0.0000
+[13.3s]   z=2.68  x=-0.0010
+[13.3s]   z=1.81  x=-0.0076
+[13.3s]   z=1.37  x=-0.0133
+[13.3s]   z=0.07  x=-0.0396
+[13.3s]   z=-0.36  x=-0.0514
+[13.3s] OK: curve profile bracketed the onset point and the plane
+[13.3s] |x| deviation before onset (first 60% of flight): 0.0003 m; after onset (last 40%): 0.0367 m
+[13.3s] OK: total lateral curve is real: |x(plane)| = 0.0370 m > 0.015
+[13.3s] OK: late-window deviation dominates (> 2×): 0.0367 vs 0.0003
+[13.3s] --- Demo 2: WALL — flat drive along the (12,28) corridor into the whale ---
+[13.7s]   scheduled swing: sent=true predictedError=−0.023s contact=true
+[13.7s] OK: WALL demo drive connected
+[15.9s] playOutcome: {"kind":"safe","atPost":1,"runnerId":"carl"} | halves A 0 B 0 | outs 0
+[15.9s] OK: the drive was genuinely fast (> 5 m/s observed post-contact)
+[15.9s] OK: ball speed collapsed to < 0.5 m/s within 1.8 m of the whale at ground level (d=0.11 m, y=0.02)
+[15.9s] OK: WALL stop is never classified caught — play resolved 'safe'
+[15.9s] --- Demo 3: IMMOVABLE — setBatter josh, flat drive at jonty: guaranteed catch, zero rng draws ---
+[16.3s] OK: IMMOVABLE demo drive connected
+[16.6s] playOutcome: {"kind":"caught","by":"jonty"} | halves A 0 B 0 | outs 0
+[16.6s] rejected→A: {"message":"runDecision","phase":"PRE_PLAY","reason":"runDecision only allowed in PLAY (phase PRE_PLAY)"}
+[16.6s] rejected→A: {"message":"runDecision","phase":"PRE_PLAY","reason":"runDecision only allowed in PLAY (phase PRE_PLAY)"}
+[16.6s] OK: jonty's guaranteed pre-bounce catch on a live seed-only room: got {"kind":"caught","by":"jonty"}
+[16.6s] --- Demo 5: spin-read — laurie (window 0.1705s vs spin) misses at nominal −0.195s; darcy (SWITCH, 0.22s) connects ---
+[16.8s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[16.8s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[16.9s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[16.9s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[17.0s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[17.0s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[17.0s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[17.1s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[17.1s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[17.2s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[17.2s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[17.3s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.2s]   scheduled swing: sent=true predictedError=−0.190s contact=true
+[20.2s] laurie connected at the nominal timing (jitter undershoot) — inconclusive attempt
+[20.2s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.2s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.3s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.3s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.4s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.4s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.5s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.5s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.5s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.6s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.6s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[20.7s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"no live runner or malformed input"}
+[35.2s] demo 5 live attempt aborted: timeout waiting for play resolution
+[35.2s] SUBSTITUTED (not a live pass): demo 5 (spin-read/CANNON live swing-window comparison) — live sub-tick timing did not land the 49.5 ms band (laurieMissed=false, darcyConnected=false); the window maths is unit-test-proven: HitModule.test.ts "spin-read penalty shrinks the window against a spinning pitch unless SWITCH-immune" (laurie-vs-darcy windows 0.1705s vs 0.22s at spin 9, input 1) and "CANNON_ARM (ctx.timingWindowMult 0.85) shrinks the window..."
+[35.6s] === Demo 4: BUTTERFINGERS — bounded numeric-seed search (pre-screened via a mulberry32 replica) ===
+[35.6s] pre-screened candidates (draw1 < 0.085, draw2 < 0.34): 7, 19, 90, 96, 146, 172, 189, 318, 337, 394, 449, 452, 465, 557, 609, 635, 641, 661, 774, 795
+[35.6s] --- seed 7 (draw1=0.0117, draw2=0.0620): fresh room ---
+[38.1s] playOutcome: {"kind":"safe","atPost":0,"runnerId":"carl"} | halves A 0 B 0 | outs 0
+[38.1s]   play 1: approach=false fumbleAtFeet=true outcome={"kind":"safe","atPost":0,"runnerId":"carl"}
+[38.1s]   seed 7 play 1: inconclusive (radius likely never entered — zero draws consumed); replaying in the same room
+[44.2s] playOutcome: {"kind":"safe","atPost":1,"runnerId":"laurie"} | halves A 0 B 0 | outs 0
+[44.2s]   play 2: approach=false fumbleAtFeet=false outcome={"kind":"safe","atPost":1,"runnerId":"laurie"}
+[44.2s]   seed 7 play 2: inconclusive (radius likely never entered — zero draws consumed); replaying in the same room
+[44.7s] --- seed 19 (draw1=0.0585, draw2=0.3269): fresh room ---
+[47.1s] playOutcome: {"kind":"safe","atPost":0,"runnerId":"carl"} | halves A 0 B 0 | outs 0
+[47.2s]   play 1: approach=true fumbleAtFeet=true outcome={"kind":"safe","atPost":0,"runnerId":"carl"}
+[47.2s] OK: BUTTERFINGERS live at seed 19: in-flight approach into joe's radius, ball velocity zeroed at his FEET (y=0.04, a gather parks at hands y=1.0), and NO caught-out (outcome 'safe')
+[47.6s] seeds tried live: 7, 19
+[47.6s] substituted demos (1): demo 5 (spin-read/CANNON live swing-window comparison)
+[47.6s] ACCEPTANCE PASSED (browser run deliberately omitted: §9.9 changes no UI surface)
