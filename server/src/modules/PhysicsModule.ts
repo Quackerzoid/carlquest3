@@ -118,6 +118,11 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
   // spawn/pitch/hit — latched from intersection events (see step()).
   const postsCrossed = new Set<number>();
 
+  // Seconds remaining before Magnus is applied again (CURVEBALL_MASTER onset
+  // gating, Milestone 9). Set from PitchParams.curveOnsetS in applyPitch;
+  // always reset to 0 on a hit (hits curve immediately, spec/design decision).
+  let curveOnsetRemaining = 0;
+
   let accumulator = 0;
 
   function placeBall(position: Vec3): void {
@@ -128,6 +133,7 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
     ballBody.resetTorques(true);
     bounced = false; // fresh flight — ground-contact tracking restarts
     postsCrossed.clear(); // and post-crossing tracking restarts for this segment
+    curveOnsetRemaining = 0; // and any pending curve-onset gate (applyPitch re-sets it after)
     // Deliberate: re-anchor the substep phase to the spawn/pitch event, discarding
     // any sub-timestep remainder (<1/60 s) so trajectories are independent of when
     // the triggering message landed within a frame. The accumulator is WORLD time —
@@ -168,6 +174,11 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
       spawnBallAt(params.origin);
       ballBody.setLinvel(params.velocity, true);
       ballBody.setAngvel(params.angularVelocity, true);
+      // CURVEBALL_MASTER onset gating (Milestone 9): Magnus is suppressed for
+      // this many seconds of simulated flight. Fielding throws also go through
+      // applyPitch but never set curveOnsetS, so this defaults to 0 (immediate
+      // curve, today's behaviour) for them.
+      curveOnsetRemaining = params.curveOnsetS ?? 0;
     },
 
     applyHit(params: HitParams): void {
@@ -178,6 +189,9 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
       // a hit (like a throw via applyPitch) begins a fresh run-out window.
       bounced = false;
       postsCrossed.clear();
+      // Hits always curve immediately: never leak a pitch's onset gate into
+      // the following hit (spec/design decision, Task 2 brief).
+      curveOnsetRemaining = 0;
     },
 
     step(dtSeconds: number): void {
@@ -186,7 +200,14 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
       // Guard against float drift starving the last substep (e.g. 40 x dt/2).
       const EPSILON = 1e-9;
       while (accumulator >= PHYSICS.FIXED_TIMESTEP - EPSILON) {
-        applyMagnus();
+        // CURVEBALL_MASTER onset gating (Milestone 9): while the gate is open,
+        // skip Magnus entirely this substep instead of applying it — decrement
+        // BEFORE the check so a fully-elapsed gate (remaining hits exactly 0)
+        // already lets this substep curve. Deterministic: same fixed dt each
+        // substep, so the countdown is identical across identical modules.
+        curveOnsetRemaining = Math.max(0, curveOnsetRemaining - PHYSICS.FIXED_TIMESTEP);
+        if (curveOnsetRemaining <= 0) applyMagnus();
+        else ballBody.resetForces(true); // no Magnus contribution this substep
         world.step(eventQueue);
         // Event-accurate bounce detection (spec §8): a fast graze can contact
         // the ground BETWEEN end-of-substep poses, which a pose poll like

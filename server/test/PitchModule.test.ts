@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CONST, getCharacter, pitchSpeed, pitchSpin } from '@carlquest/shared';
+import { CONST, getCharacter, pitchAbilityMods, pitchSpeed, pitchSpin } from '@carlquest/shared';
 import { resolvePitch } from '../src/modules/PitchModule';
 
 const kian = getCharacter('kian');
+const joel = getCharacter('joel');
 const len = (v: { x: number; y: number; z: number }) => Math.hypot(v.x, v.y, v.z);
 
 describe('resolvePitch', () => {
@@ -72,5 +73,44 @@ describe('resolvePitch', () => {
     const b = resolvePitch(kian.stats, input);
     expect(a).toEqual(b);
     expect(input.aim).toEqual({ x: 0.3, y: 0.1, z: -1 });
+  });
+
+  describe('ability mods (Milestone 9)', () => {
+    it('neutral/absent mods produce identical params to today\'s output (no curveOnsetS)', () => {
+      const input = { aim: { x: 0, y: 0, z: -1 }, spinInput: 1 };
+      const withoutMods = resolvePitch(kian.stats, input);
+      const withNeutral = resolvePitch(kian.stats, input, {
+        pitchStatBonus: 0,
+        spinCurveMult: 1,
+        curveOnsetFraction: 0,
+        batterTimingWindowMult: 1,
+      });
+      expect(withNeutral).toEqual(withoutMods);
+      expect(withoutMods.curveOnsetS === undefined || withoutMods.curveOnsetS === 0).toBe(true);
+    });
+
+    it("CURVEBALL_MASTER: spin scaled by spinCurveMult (x1.6) and curveOnsetS computed from flight-to-plane time", () => {
+      const input = { aim: { x: 0, y: 0, z: -1 }, spinInput: 1 };
+      const mods = pitchAbilityMods(kian); // kian's ability is CURVEBALL_MASTER
+      const neutral = resolvePitch(kian.stats, input);
+      const curved = resolvePitch(kian.stats, input, mods);
+
+      expect(curved.angularVelocity.y).toBeCloseTo(neutral.angularVelocity.y * mods.spinCurveMult, 8);
+
+      const speed = pitchSpeed(kian.stats.pitch);
+      // Aim is straight -z, same axis as BOWLING_SQUARE -> BATTING_SQUARE.
+      const distance = Math.abs(CONST.FIELD.BOWLING_SQUARE.z - CONST.FIELD.BATTING_SQUARE.z);
+      const expectedOnset = (distance / speed) * mods.curveOnsetFraction;
+
+      expect(curved.curveOnsetS).toBeGreaterThan(0);
+      expect(curved.curveOnsetS).toBeCloseTo(expectedOnset, 8);
+    });
+
+    it('CANNON_ARM: velocity magnitude uses stats.pitch + pitchStatBonus, uncapped', () => {
+      const input = { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 };
+      const mods = pitchAbilityMods(joel); // joel's ability is CANNON_ARM
+      const boosted = resolvePitch(joel.stats, input, mods);
+      expect(len(boosted.velocity)).toBeCloseTo(pitchSpeed(joel.stats.pitch + mods.pitchStatBonus), 8);
+    });
   });
 });

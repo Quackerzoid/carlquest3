@@ -197,6 +197,96 @@ describe('PhysicsModule', () => {
     });
   });
 
+  describe('Magnus curve onset gating (Milestone 9, CURVEBALL_MASTER)', () => {
+    const pitchVelocity = { x: 0, y: 0, z: -20 };
+    const flightS = 0.35; // time to stay airborne for the existing curve test above
+
+    it('suppresses lateral deviation until curveOnsetS has elapsed, then curves', () => {
+      const onset = flightS / 2;
+
+      // Baseline: no onset (immediate curve) for the same duration, for comparison.
+      physics.applyPitch({
+        velocity: pitchVelocity,
+        angularVelocity: { x: 0, y: CONST.GAME.SPIN_MAX_RADS, z: 0 },
+      });
+      run(physics, onset);
+      const immediateAtOnsetTimeX = physics.getBallState().position.x;
+
+      // Gated: curveOnsetS = onset.
+      physics.applyPitch({
+        velocity: pitchVelocity,
+        angularVelocity: { x: 0, y: CONST.GAME.SPIN_MAX_RADS, z: 0 },
+        curveOnsetS: onset,
+      });
+      run(physics, onset);
+      const gatedAtOnsetTimeX = physics.getBallState().position.x;
+
+      // While gated, deviation from the straight-line x (bowling square x) must be negligible.
+      expect(Math.abs(gatedAtOnsetTimeX - CONST.FIELD.BOWLING_SQUARE.x)).toBeLessThan(1e-3);
+      // The immediate-curve pitch has already deviated meaningfully by the same time.
+      expect(Math.abs(immediateAtOnsetTimeX - CONST.FIELD.BOWLING_SQUARE.x)).toBeGreaterThan(1e-3);
+
+      // Continue the gated pitch past onset, to the batting plane: it now curves.
+      run(physics, flightS - onset);
+      const gatedAtPlaneX = physics.getBallState().position.x;
+      expect(Math.abs(gatedAtPlaneX - CONST.FIELD.BOWLING_SQUARE.x)).toBeGreaterThan(0.05);
+    });
+
+    it('with curveOnsetS = 0 (or absent), the pitch deviates from the very first substeps like today', () => {
+      physics.applyPitch({
+        velocity: pitchVelocity,
+        angularVelocity: { x: 0, y: CONST.GAME.SPIN_MAX_RADS, z: 0 },
+      });
+      run(physics, 0.05);
+      const noOnsetEarlyX = physics.getBallState().position.x;
+
+      physics.applyPitch({
+        velocity: pitchVelocity,
+        angularVelocity: { x: 0, y: CONST.GAME.SPIN_MAX_RADS, z: 0 },
+        curveOnsetS: 0,
+      });
+      run(physics, 0.05);
+      const zeroOnsetEarlyX = physics.getBallState().position.x;
+
+      expect(zeroOnsetEarlyX).toBeCloseTo(noOnsetEarlyX, 8);
+      expect(Math.abs(zeroOnsetEarlyX - CONST.FIELD.BOWLING_SQUARE.x)).toBeGreaterThan(0);
+    });
+
+    it('applyHit always resets the gate to 0 (hits curve immediately, no leaked pitch gate)', () => {
+      // Apply a pitch with a long onset that would still be active for the whole run.
+      physics.applyPitch({
+        velocity: { x: 0, y: 0, z: -1 }, // slow, so the gate would still be open
+        angularVelocity: { x: 0, y: 0, z: 0 },
+        curveOnsetS: 10,
+      });
+      run(physics, 0.05);
+
+      // Now hit it with spin — must curve immediately regardless of the leftover pitch gate.
+      physics.applyHit({
+        velocity: pitchVelocity,
+        angularVelocity: { x: 0, y: CONST.GAME.SPIN_MAX_RADS, z: 0 },
+      });
+      run(physics, 0.05);
+      const hitEarlyX = physics.getBallState().position.x;
+      expect(Math.abs(hitEarlyX - CONST.FIELD.BOWLING_SQUARE.x)).toBeGreaterThan(0);
+    });
+
+    it('determinism holds for a curve-onset pitch (exact float equality)', async () => {
+      const twin = await createPhysicsModule();
+      const pitch = {
+        velocity: pitchVelocity,
+        angularVelocity: { x: 0, y: CONST.GAME.SPIN_MAX_RADS, z: 0 },
+        curveOnsetS: flightS / 2,
+      };
+      physics.applyPitch(pitch);
+      twin.applyPitch(pitch);
+      run(physics, 300 * DT);
+      run(twin, 300 * DT);
+      expect(physics.getBallState()).toEqual(twin.getBallState());
+      twin.dispose();
+    });
+  });
+
   describe('post sensors', () => {
     it('detects the ball inside a post sensor volume', () => {
       const post = CONST.FIELD.POSTS[0];

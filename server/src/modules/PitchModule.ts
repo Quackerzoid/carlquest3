@@ -6,6 +6,7 @@ import {
   CONST,
   pitchSpeed,
   pitchSpin,
+  type PitchAbilityMods,
   type PitchInput,
   type PitchParams,
   type StatBlock,
@@ -42,10 +43,39 @@ function normaliseAim(aim: Vec3, maxElevationDeg: number): Vec3 {
   return { x: usable.x / length, y: cappedY / length, z: usable.z / length };
 }
 
-export function resolvePitch(stats: StatBlock, input: PitchInput): PitchParams {
+/** Neutral mods: identical output to the pre-M9 (no-ability) behaviour. */
+const NEUTRAL_MODS: PitchAbilityMods = {
+  pitchStatBonus: 0,
+  spinCurveMult: 1,
+  curveOnsetFraction: 0,
+  batterTimingWindowMult: 1,
+};
+
+/**
+ * Estimated flight time (seconds) from the bowling square to the batting
+ * square's z-plane, travelling along the normalised aim direction at the
+ * given speed. Returns 0 if the aim never reaches the plane (moving away
+ * from it, or with no horizontal component along the batting-square axis).
+ */
+function flightToPlaneSeconds(direction: Vec3, speed: number): number {
+  if (speed <= 0) return 0;
+  const distanceZ = FIELD.BATTING_SQUARE.z - FIELD.BOWLING_SQUARE.z;
+  // The pitch travels from BOWLING_SQUARE towards BATTING_SQUARE; distanceZ
+  // and direction.z must have the same sign for the aim to close on the plane.
+  if (Math.abs(direction.z) < 1e-9 || Math.sign(direction.z) !== Math.sign(distanceZ)) return 0;
+  const distance = Math.abs(distanceZ / direction.z) * Math.hypot(direction.x, direction.z);
+  return distance / speed;
+}
+
+export function resolvePitch(
+  stats: StatBlock,
+  input: PitchInput,
+  mods: PitchAbilityMods = NEUTRAL_MODS,
+): PitchParams {
   const direction = normaliseAim(input.aim, GAME.PITCH_ELEVATION_MAX_DEG);
-  const speed = pitchSpeed(stats.pitch);
+  const speed = pitchSpeed(stats.pitch + mods.pitchStatBonus);
   const spinScalar = Math.max(-1, Math.min(1, input.spinInput));
+  const curveOnsetS = flightToPlaneSeconds(direction, speed) * mods.curveOnsetFraction;
   return {
     origin: {
       x: FIELD.BOWLING_SQUARE.x,
@@ -54,7 +84,7 @@ export function resolvePitch(stats: StatBlock, input: PitchInput): PitchParams {
     },
     velocity: { x: direction.x * speed, y: direction.y * speed, z: direction.z * speed },
     // Sidespin about the vertical axis; Magnus turns this into lateral curve.
-    // curveMult stays 1 until CURVEBALL_MASTER (Milestone 9).
-    angularVelocity: { x: 0, y: pitchSpin(stats.spin, 1) * spinScalar, z: 0 },
+    angularVelocity: { x: 0, y: pitchSpin(stats.spin, mods.spinCurveMult) * spinScalar, z: 0 },
+    ...(curveOnsetS > 0 ? { curveOnsetS } : {}),
   };
 }
