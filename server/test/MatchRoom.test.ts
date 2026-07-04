@@ -202,11 +202,6 @@ describe('MatchRoom', () => {
     expect(room.state.currentPitcherId).toBe('kian');
   });
 
-  it('caps the room at two clients', async () => {
-    const room = await colyseus.createRoom('match', {});
-    expect(room.maxClients).toBe(2);
-  });
-
   it('fielders start at their FIELDING_POSITIONS slots (9 fielders, kian on the bowler slot)', async () => {
     const room = await colyseus.createRoom('match', {});
     expect(room.state.fielders.size).toBe(9);
@@ -569,15 +564,24 @@ describe('MatchRoom', () => {
   it('rejects every message out of its phase, broadcasting a structured { message, phase, reason }', async () => {
     const room = await colyseus.createRoom('match', {});
     const { clientA, clientB } = await connectPair(room);
+    // Rejections are targeted (client.send), not broadcast — each collector
+    // must listen on the SAME client that sends the offending message.
     const rejects: { message: string; phase: MatchPhase; reason: string }[] = [];
+    const rejectsB: { message: string; phase: MatchPhase; reason: string }[] = [];
     clientA.onMessage('rejected', (p: { message: string; phase: MatchPhase; reason: string }) => rejects.push(p));
+    clientB.onMessage('rejected', (p: { message: string; phase: MatchPhase; reason: string }) => rejectsB.push(p));
 
-    async function expectReject(send: () => void, message: string, phase: MatchPhase): Promise<void> {
-      const before = rejects.length;
+    async function expectReject(
+      send: () => void,
+      message: string,
+      phase: MatchPhase,
+      collector: { message: string; phase: MatchPhase; reason: string }[] = rejects,
+    ): Promise<void> {
+      const before = collector.length;
       send();
-      for (let i = 0; i < 30 && rejects.length === before; i += 1) await room.waitForNextSimulationTick();
-      expect(rejects.length).toBeGreaterThan(before);
-      const r = rejects[rejects.length - 1];
+      for (let i = 0; i < 30 && collector.length === before; i += 1) await room.waitForNextSimulationTick();
+      expect(collector.length).toBeGreaterThan(before);
+      const r = collector[collector.length - 1];
       expect(r?.message).toBe(message);
       expect(r?.phase).toBe(phase);
       expect(typeof r?.reason).toBe('string');
@@ -607,7 +611,7 @@ describe('MatchRoom', () => {
     // not wrongRole.
     await expectReject(() => clientA.send('readyForPlay'), 'readyForPlay', 'PLAY');
     await expectReject(() => clientA.send('rematch'), 'rematch', 'PLAY');
-    await expectReject(() => fieldingClient(room, clientA, clientB).send('pitch'), 'pitch', 'PLAY');
+    await expectReject(() => fieldingClient(room, clientA, clientB).send('pitch'), 'pitch', 'PLAY', rejectsB);
   }, 20000);
 
   // ---- Scoring / outs ------------------------------------------------------
@@ -807,6 +811,23 @@ describe('MatchRoom', () => {
       expect(JSON.parse(room.state.lastRejection).reason).toBe('wrongRole');
     });
 
+    it('delivers a rejected message ONLY to the offending client, never broadcasting it to the other', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await startPlay(room, clientA, clientB);
+      const rejectsA: unknown[] = [];
+      const rejectsB: unknown[] = [];
+      clientA.onMessage('rejected', (p: unknown) => rejectsA.push(p));
+      clientB.onMessage('rejected', (p: unknown) => rejectsB.push(p));
+
+      // Side A bats first, so A pitching is a routine wrongRole rejection.
+      clientA.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+      for (let i = 0; i < 10; i += 1) await room.waitForNextSimulationTick();
+
+      expect(rejectsA.length).toBe(1);
+      expect(rejectsB.length).toBe(0); // B must NEVER see A's own rejection
+    });
+
     it('requires BOTH sides to confirm positioning and ready up (duplicates idempotent)', async () => {
       const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
       const { clientA, clientB } = await connectPair(room);
@@ -912,6 +933,24 @@ describe('MatchRoom', () => {
       });
       await clientB.leave(false);
       expect((await left).side).toBe('B'); // fires when the 1 s grace lapses
+    }, 10000);
+
+    it('rejects a third client trying to join while a reconnect grace is pending', async () => {
+      // Pins the Colyseus seat-reservation invariant that guards the room while
+      // it is unlocked mid-grace: an unconsented drop frees no seat count-wise
+      // (allowReconnection reserves the slot), so a third join must still fail
+      // exactly like the steady-state two-client lock, even though one seat's
+      // socket is currently disconnected.
+      const clientA = await colyseus.sdk.create<MatchState>('match', { code: 'GRAC', rng: ALWAYS_MISS });
+      const clientB = await colyseus.sdk.join<MatchState>('match', { code: 'GRAC' });
+      await awaitClientState(clientA);
+      await awaitClientState(clientB);
+      const room = colyseus.getRoomById<MatchState>(clientA.roomId);
+      await startPlay(room, clientA, clientB);
+      await clientB.leave(false); // unconsented: seat held for the grace window
+      await waitForCondition(room, () => room.state.paused);
+
+      await expect(colyseus.sdk.join('match', { code: 'GRAC' })).rejects.toThrow();
     });
 
     it('a consented quit broadcasts exactly ONE opponentLeft, never a spurious second one for the survivor', async () => {

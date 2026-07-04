@@ -14,6 +14,9 @@
  */
 import { chromium } from 'playwright';
 
+// file:// URL pathnames on Windows come back as e.g. "/D:/..." (leading slash
+// before the drive letter) — strip it so path.join()/fs calls get a real
+// Windows path instead of a bogus rooted-at-"/" one. No-op on POSIX (no match).
 const OUT = new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const URL_APP = 'http://localhost:5173';
 const log = (m) => console.log(m);

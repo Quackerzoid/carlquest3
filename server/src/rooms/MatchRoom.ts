@@ -311,11 +311,17 @@ export class MatchRoom extends Room<MatchState> {
     return this.rules.view().phase;
   }
 
-  /** Record and broadcast a structured rejection { message, phase, reason }. */
-  private reject(message: string, reason: string): void {
+  /**
+   * Record and send a structured rejection { message, phase, reason } to the
+   * OFFENDING client only. `state.lastRejection` still mirrors the payload for
+   * tests (and any future spectators), but the actual `rejected` message must
+   * not broadcast: a routine wrongRole/paused rejection for client A is not
+   * relevant to client B and must never appear on B's status line.
+   */
+  private reject(client: Client, message: string, reason: string): void {
     const payload = { message, phase: this.phase(), reason };
     this.state.lastRejection = JSON.stringify(payload);
-    this.broadcast('rejected', payload);
+    client.send('rejected', payload);
   }
 
   /** Runners currently standing on a real post (1-4) — the pressure/threshold count. */
@@ -336,20 +342,20 @@ export class MatchRoom extends Room<MatchState> {
 
   private handlePitch(client: Client, message: unknown): void {
     if (this.state.paused) {
-      this.reject('pitch', 'paused');
+      this.reject(client, 'pitch', 'paused');
       return;
     }
     if (this.phase() !== 'PLAY') {
-      this.reject('pitch', `pitch only allowed in PLAY (phase ${this.phase()})`);
+      this.reject(client, 'pitch', `pitch only allowed in PLAY (phase ${this.phase()})`);
       return;
     }
     if (this.sideOf(client) !== this.fieldingSide()) {
-      this.reject('pitch', 'wrongRole');
+      this.reject(client, 'pitch', 'wrongRole');
       return;
     }
     const m = asRecord(message) as Partial<PitchInput>;
     if (this.state.ballLive || !isVec3(m.aim) || !isFiniteNumber(m.spinInput)) {
-      this.reject('pitch', 'ball already live or malformed input');
+      this.reject(client, 'pitch', 'ball already live or malformed input');
       return;
     }
     const pitcher = getCharacter(this.state.currentPitcherId);
@@ -366,33 +372,33 @@ export class MatchRoom extends Room<MatchState> {
 
   private handleSwing(client: Client, message: unknown): void {
     if (this.state.paused) {
-      this.reject('swing', 'paused');
+      this.reject(client, 'swing', 'paused');
       return;
     }
     if (this.phase() !== 'PLAY') {
-      this.reject('swing', `swing only allowed in PLAY (phase ${this.phase()})`);
+      this.reject(client, 'swing', `swing only allowed in PLAY (phase ${this.phase()})`);
       return;
     }
     if (this.sideOf(client) !== this.rules.view().battingSide) {
-      this.reject('swing', 'wrongRole');
+      this.reject(client, 'swing', 'wrongRole');
       return;
     }
     const m = asRecord(message) as Partial<SwingMessage>;
     // The client 'timing' field is accepted but ignored; the server's own
     // sim-time is authoritative (M3 decision, latency comp revisited in M6).
     if (!this.state.ballLive || this.swung || !isVec3(m.aim) || !isFiniteNumber(m.spinInput)) {
-      this.reject('swing', 'no live pitch, already swung, or malformed input');
+      this.reject(client, 'swing', 'no live pitch, already swung, or malformed input');
       return;
     }
     const error = this.timingErrorNow();
     if (error === null) {
-      this.reject('swing', 'ball never reaches the batter');
+      this.reject(client, 'swing', 'ball never reaches the batter');
       return;
     }
     this.swung = true;
     const batterId = this.rules.view().currentBatterId;
     if (batterId === null) {
-      this.reject('swing', 'no batter up');
+      this.reject(client, 'swing', 'no batter up');
       return;
     }
     const batter = getCharacter(batterId);
@@ -414,21 +420,21 @@ export class MatchRoom extends Room<MatchState> {
 
   private handleRunDecision(client: Client, message: unknown): void {
     if (this.state.paused) {
-      this.reject('runDecision', 'paused');
+      this.reject(client, 'runDecision', 'paused');
       return;
     }
     if (this.phase() !== 'PLAY') {
-      this.reject('runDecision', `runDecision only allowed in PLAY (phase ${this.phase()})`);
+      this.reject(client, 'runDecision', `runDecision only allowed in PLAY (phase ${this.phase()})`);
       return;
     }
     if (this.sideOf(client) !== this.rules.view().battingSide) {
-      this.reject('runDecision', 'wrongRole');
+      this.reject(client, 'runDecision', 'wrongRole');
       return;
     }
     const m = asRecord(message) as Partial<RunDecisionInput>;
     const hasLiveRunner = this.contactMade && this.running.runners().some((r) => !r.out && !r.home);
     if (!this.state.ballLive || !hasLiveRunner || typeof m.go !== 'boolean') {
-      this.reject('runDecision', 'no live runner or malformed input');
+      this.reject(client, 'runDecision', 'no live runner or malformed input');
       return;
     }
     // Shared stop/go applies to every live runner (RunningModule; user decision 2).
@@ -437,16 +443,16 @@ export class MatchRoom extends Room<MatchState> {
 
   private handleConfirmPositioning(client: Client): void {
     if (this.state.paused) {
-      this.reject('confirmPositioning', 'paused');
+      this.reject(client, 'confirmPositioning', 'paused');
       return;
     }
     const side = this.sideOf(client);
     if (side === null) {
-      this.reject('confirmPositioning', 'wrongRole');
+      this.reject(client, 'confirmPositioning', 'wrongRole');
       return;
     }
     if (this.phase() !== 'INITIAL_POSITIONING') {
-      this.reject('confirmPositioning', `only allowed in INITIAL_POSITIONING (phase ${this.phase()})`);
+      this.reject(client, 'confirmPositioning', `only allowed in INITIAL_POSITIONING (phase ${this.phase()})`);
       return;
     }
     this.confirmed[side] = true; // duplicate confirm is idempotent, not a rejection
@@ -459,16 +465,16 @@ export class MatchRoom extends Room<MatchState> {
 
   private handleReadyForPlay(client: Client): void {
     if (this.state.paused) {
-      this.reject('readyForPlay', 'paused');
+      this.reject(client, 'readyForPlay', 'paused');
       return;
     }
     const side = this.sideOf(client);
     if (side === null) {
-      this.reject('readyForPlay', 'wrongRole');
+      this.reject(client, 'readyForPlay', 'wrongRole');
       return;
     }
     if (this.phase() !== 'PRE_PLAY') {
-      this.reject('readyForPlay', `only allowed in PRE_PLAY (phase ${this.phase()})`);
+      this.reject(client, 'readyForPlay', `only allowed in PRE_PLAY (phase ${this.phase()})`);
       return;
     }
     this.ready[side] = true;
@@ -481,15 +487,15 @@ export class MatchRoom extends Room<MatchState> {
 
   private handleRematch(client: Client): void {
     if (this.state.paused) {
-      this.reject('rematch', 'paused');
+      this.reject(client, 'rematch', 'paused');
       return;
     }
     if (this.sideOf(client) === null) {
-      this.reject('rematch', 'wrongRole');
+      this.reject(client, 'rematch', 'wrongRole');
       return;
     }
     if (!this.rules.rematch()) {
-      this.reject('rematch', `only allowed in GAME_OVER (phase ${this.phase()})`);
+      this.reject(client, 'rematch', `only allowed in GAME_OVER (phase ${this.phase()})`);
       return;
     }
     // Fresh match: clear runners (innings/rematch is the only running.reset seam),
