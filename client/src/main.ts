@@ -111,7 +111,6 @@ function hideLobby(): void {
 }
 
 function runMatch(net: Net): void {
-  hideLobby();
   let lastPlay = '';
   let localAction = '';
   const refresh = () => {
@@ -142,7 +141,13 @@ function runMatch(net: Net): void {
     ball.update(state.ball.x, state.ball.y, state.ball.z, state.ballLive);
     fielders.update(state.fielders.values());
     runners.update(state.runners.values());
-    if (state.phase !== 'LOBBY') hideLobby();
+    if (state.phase === 'LOBBY') {
+      // Idempotent refresh: the first patch may arrive after showLobbyWaiting's
+      // synchronous read, and later patches are harmless no-op re-assignments.
+      if (state.roomCode) lobbyCode.textContent = state.roomCode;
+    } else {
+      hideLobby();
+    }
     refresh();
   });
 }
