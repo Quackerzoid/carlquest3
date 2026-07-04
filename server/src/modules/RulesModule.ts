@@ -52,7 +52,7 @@ export interface RulesView {
 export function createRulesModule(cfg: RulesConfig): {
   view(): RulesView;
   bothConnected(): boolean;
-  completeDraft(): boolean;
+  completeDraft(squads?: { squadA: Character[]; squadB: Character[] }): boolean;
   confirmPositioning(): boolean;
   readyForPlay(): boolean;
   resolvePlay(cause: PlayOutcome, facts: SettlementFact[]): PlayResolution | null;
@@ -183,8 +183,18 @@ export function createRulesModule(cfg: RulesConfig): {
     return true;
   }
 
-  function completeDraft(): boolean {
+  function completeDraft(squads?: { squadA: Character[]; squadB: Character[] }): boolean {
     if (phase !== 'DRAFT') return false;
+    if (squads !== undefined) {
+      // M7: the real draft replaces the construction-time squads at the moment
+      // the DRAFT phase closes (batting order = array order = pick order).
+      // startInnings(0) already ran at construction (against the placeholder
+      // squads), so re-run it now the real squadIds are in so the queue/first
+      // batter reflect pick order rather than the stale construction-time one.
+      squadIds.A = squads.squadA.map((c) => c.id);
+      squadIds.B = squads.squadB.map((c) => c.id);
+      startInnings(inningsIndex);
+    }
     phase = 'INITIAL_POSITIONING';
     return true;
   }

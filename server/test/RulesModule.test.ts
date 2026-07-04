@@ -378,3 +378,28 @@ describe('RulesModule — tiebreak (sudden death)', () => {
     expect(rules.view().tiebreak).toBe(false);
   });
 });
+
+describe('completeDraft with drafted squads (M7)', () => {
+  it('replaces the constructor squads so batting order = pick order', () => {
+    const rules = createRulesModule({ squadA: squad('a1', 'a2'), squadB: squad('b1', 'b2') });
+    rules.bothConnected();
+    const squadA = squad('laurie', 'carl', 'joel');
+    const squadB = squad('ricy', 'kian', 'josh');
+    expect(rules.completeDraft({ squadA, squadB })).toBe(true);
+    rules.confirmPositioning();
+    rules.readyForPlay();
+    expect(rules.view().currentBatterId).toBe('laurie'); // A's FIRST PICK bats first, not the table order
+  });
+
+  it('does not replace squads when the transition is refused (wrong phase)', () => {
+    const rules = createRulesModule({ squadA: squad('a1', 'a2'), squadB: squad('b1', 'b2') });
+    const squadA = squad('carl');
+    const squadB = squad('joel');
+    expect(rules.completeDraft({ squadA, squadB })).toBe(false); // still LOBBY
+    rules.bothConnected();
+    rules.completeDraft();
+    rules.confirmPositioning();
+    rules.readyForPlay();
+    expect(rules.view().currentBatterId).toBe('a1'); // constructor order intact
+  });
+});
