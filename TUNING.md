@@ -32,6 +32,12 @@ elsewhere.
   `MOVE_MAX`. Tune together with `THROW_RELEASE_DELAY_S` — a longer play gives
   fielders more run-out windows, so rounders should stay rare, not impossible.
 
+## Milestone 6 — Two-player sync (introduced 2026-07-04)
+
+| Constant | Current value | Controls | Playtest watch-list |
+|----------|---------------|----------|---------------------|
+| `GAME.RECONNECT_GRACE_S` | `60` (s) | How long a mid-game disconnect pauses the match (simulation frozen, seat held) before the survivor is told the opponent left and the room disposes. | Pure first guess. Too short → a router blip ends real matches; too long → the survivor is hostage to a rage-quit that closed the tab uncleanly (no consented leave). Judge against real remote play: if most genuine drops reconnect within ~15 s, cut it; consider surfacing a countdown in the M10 UI before tuning further. Tests override via the `reconnectGraceS` room option rather than this constant. |
+
 ## Carried over from earlier milestones
 
 - **Max-power hit vs `PLAY_TIMEOUT_S` (M3).** A max-power 60°-elevation hit flies
