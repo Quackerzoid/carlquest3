@@ -913,5 +913,50 @@ describe('MatchRoom', () => {
       await clientB.leave(false);
       expect((await left).side).toBe('B'); // fires when the 1 s grace lapses
     });
+
+    it('a consented quit broadcasts exactly ONE opponentLeft, never a spurious second one for the survivor', async () => {
+      // Regression for the onLeave re-entrancy bug: this.disconnect() forcibly
+      // closes every remaining client, which RE-INVOKES the survivor's own
+      // onLeave. Pre-fix, sideOf still resolved and phase wasn't LOBBY, so the
+      // consented branch ran a SECOND time for the survivor and broadcast a
+      // second opponentLeft naming the WRONG side (the survivor's own side, 'A',
+      // instead of the real leaver's side, 'B').
+      //
+      // A naive client-side message collector is NOT sufficient here: the
+      // server-side broadcast() for the re-entrant call races the survivor's own
+      // forced connection close (disconnect() closes the survivor's socket
+      // right after broadcasting), so the second message is frequently dropped
+      // in-flight rather than delivered — the client sees only one message even
+      // though the room broadcast twice. So this test spies directly on
+      // `Room.prototype.broadcast` (server-side, unaffected by delivery/close
+      // races) to see how many times 'opponentLeft' actually fired, IN ADDITION
+      // to the client-side collector.
+      const { Room } = await import('@colyseus/core');
+      const broadcastSpy = vi.spyOn(Room.prototype, 'broadcast');
+
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await startPlay(room, clientA, clientB);
+
+      const received: { side: string }[] = [];
+      clientA.onMessage('opponentLeft', (m: { side: string }) => received.push(m));
+
+      await clientB.leave(true); // deliberate quit
+
+      // Wait for disposal to settle: poll clientA's connection until it closes,
+      // capped so a genuine hang still fails fast instead of timing out silently.
+      const deadline = Date.now() + 2000;
+      while (clientA.connection.isOpen && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      // Let any queued microtasks/timers (e.g. the re-entrant onLeave's own
+      // broadcast + disconnect chain) settle before reading the spy.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const opponentLeftCalls = broadcastSpy.mock.calls.filter((args) => typeof args[0] === 'string' && args[0] === 'opponentLeft');
+      expect(opponentLeftCalls.length).toBe(1);
+      expect(opponentLeftCalls[0]?.[1]).toEqual({ side: 'B' });
+      expect(received).toEqual([{ side: 'B' }]);
+    }, 10000);
   });
 });

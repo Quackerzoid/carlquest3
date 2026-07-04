@@ -145,6 +145,18 @@ export class MatchRoom extends Room<MatchState> {
   private ready: Record<TeamSide, boolean> = { A: false, B: false };
   /** Mid-game reconnect grace window (seconds); test-only override, see MatchRoomOptions. */
   private reconnectGraceS: number = CONST.GAME.RECONNECT_GRACE_S;
+  /**
+   * Set immediately BEFORE the first `disconnect()` call (either onLeave branch
+   * below). `disconnect()` forcibly closes every remaining client, which
+   * RE-INVOKES this room's own `onLeave` for the survivor (Colyseus
+   * `_forciblyCloseClient` triggers the same onLeave path with a consented-style
+   * close). At that point `sideOf` still resolves (seats aren't cleared) and the
+   * phase still isn't LOBBY, so without this guard the consented branch would
+   * run a SECOND time for the survivor: a spurious `opponentLeft` naming the
+   * WRONG side (the survivor's own) plus a second `disconnect()` call. Guarding
+   * re-entry here is the fix, verified against `Room.js`'s `_forciblyCloseClient`.
+   */
+  private shuttingDown = false;
 
   /** Which seat a message came from; null = not seated (defensive — reject). */
   private sideOf(client: Client): TeamSide | null {
@@ -223,6 +235,12 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   override async onLeave(client: Client, consented?: boolean): Promise<void> {
+    // Re-entrancy guard: disconnect() (either branch below) forcibly closes
+    // every remaining client, which re-invokes onLeave for the SURVIVOR before
+    // this handler's own disconnect() promise settles. Without this guard the
+    // survivor's re-entrant call would re-run the consented branch (seats/phase
+    // still look mid-game) and broadcast a second, wrongly-sided opponentLeft.
+    if (this.shuttingDown) return;
     console.log(`client ${client.sessionId} left`);
     const side = this.sideOf(client);
     if (side === null) return;
@@ -244,6 +262,7 @@ export class MatchRoom extends Room<MatchState> {
       // disconnect()'s own promise (which waits on the "disconnect" event)
       // never resolves either. Fire-and-forget, with the rejection logged.
       this.broadcast('opponentLeft', { side });
+      this.shuttingDown = true; // set BEFORE disconnect() — see field comment
       this.disconnect().catch((err: unknown) => console.error('[MatchRoom] disconnect() after consented quit failed:', err));
       return;
     }
@@ -254,10 +273,18 @@ export class MatchRoom extends Room<MatchState> {
       this.setConnected(side, true);
       if (this.state.connectedA && this.state.connectedB) this.state.paused = false;
     } catch {
-      // Grace expired or the room is already disposing (both players gone).
-      // Same not-awaited reasoning as the consented-quit branch above.
+      // Grace expired (allowReconnection rejected) OR the room is already
+      // disposing because the OTHER seat's onLeave already ran the consented
+      // or grace-expiry branch (both players gone). `this.clients.length > 0`
+      // distinguishes the two: >0 means a survivor is still connected and
+      // needs telling; ===0 means nobody is left to notify (both players
+      // already left — broadcasting/disconnecting again would be pointless,
+      // and the room is disposing anyway). The shuttingDown guard above
+      // covers the interleaving where THIS call is the survivor's re-entrant
+      // onLeave triggered by the other branch's disconnect().
       if (this.clients.length > 0) {
         this.broadcast('opponentLeft', { side });
+        this.shuttingDown = true; // set BEFORE disconnect() — see field comment
         this.disconnect().catch((err: unknown) => console.error('[MatchRoom] disconnect() after reconnect-grace expiry failed:', err));
       }
     }
