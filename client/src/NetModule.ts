@@ -237,6 +237,10 @@ function wrapRoom(room: Room<MatchStateView>): Net {
     },
     markLeaving() {
       leaving = true;
+      // Clear the stored reconnection token (design §3): a deliberate leave must
+      // not leave a stale token behind for a later accidental tryReconnect() to
+      // pick up and rejoin a match the player already quit.
+      reconnectionToken = null;
     },
   };
 

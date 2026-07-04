@@ -174,7 +174,21 @@ function runMatch(net: Net): void {
       ui.pushEvent('connection lost — reconnecting…');
       ui.setNotice('reconnecting…');
       const fresh = await net.tryReconnect();
+      // The user may have clicked LEAVE while the reconnect was in flight — that
+      // handler already called teardown() (setting `torn`) and returned to the
+      // lobby. Capture torn's state from BEFORE this teardown() call: if it was
+      // already true, the match was deliberately abandoned and a resolved
+      // reconnect must not re-enter it (it would silently pull the player back
+      // into the match they just left).
+      const deliberatelyLeft = torn;
       teardown();
+      if (deliberatelyLeft) {
+        // Don't strand the freshly-reconnected room the player no longer wants.
+        void fresh?.room.leave().catch(() => {
+          // Already closing/closed server-side; nothing more to do.
+        });
+        return;
+      }
       if (fresh) {
         runMatch(fresh);
         ui.pushEvent('reconnected');

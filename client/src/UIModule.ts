@@ -109,9 +109,16 @@ function legendHint(state: MatchStateView, net: Net): string {
   return '';
 }
 
-/** Client-side PRESSURE derivation: final innings OR 2+ runners on posts (no schema addition). */
+/**
+ * Client-side PRESSURE derivation, mirroring server/src/modules/RulesModule.ts
+ * `pressure()` exactly: `tiebreak || isFinalInnings() || runnersOnPosts >= 2`, where
+ * `isFinalInnings()` = `tiebreak || inningsIndex >= totalSlots - 2` (the whole final
+ * A/B pair, not just its last slot — no schema addition, so `tiebreak` is read
+ * straight from state and the innings/runner-count halves are re-derived here).
+ */
 function underPressure(state: MatchStateView): boolean {
-  if (state.inningsIndex >= CONST.GAME.INNINGS_COUNT * 2 - 1) return true;
+  if (state.tiebreak) return true;
+  if (state.inningsIndex >= CONST.GAME.INNINGS_COUNT * 2 - 2) return true;
   let onPosts = 0;
   for (const runner of state.runners.values()) if (runner.atPost >= 1) onPosts += 1;
   return onPosts >= 2;
