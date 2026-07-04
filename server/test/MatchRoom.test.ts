@@ -47,20 +47,30 @@ async function waitForPhase(room: TestRoom, phase: MatchPhase, maxTicks = 180): 
   throw new Error(`phase ${phase} not reached (stuck at ${room.state.phase})`);
 }
 
+/** The client currently batting / fielding (side A bats first; innings switches flip it). */
+function battingClient(room: TestRoom, clientA: TestClient, clientB: TestClient): TestClient {
+  return room.state.battingSide === 'A' ? clientA : clientB;
+}
+function fieldingClient(room: TestRoom, clientA: TestClient, clientB: TestClient): TestClient {
+  return room.state.battingSide === 'A' ? clientB : clientA;
+}
+
 /**
- * Walk the phase machine to PLAY: confirmPositioning (INITIAL_POSITIONING →
- * PRE_PLAY) then readyForPlay (PRE_PLAY → PLAY). onJoin has already advanced the
- * first client to INITIAL_POSITIONING; this covers both the very first play and
- * the PRE_PLAY entry after a resolved play.
+ * Walk the phase machine to PLAY: BOTH clients confirmPositioning (INITIAL_POSITIONING →
+ * PRE_PLAY) then BOTH readyForPlay (PRE_PLAY → PLAY). onJoin has already advanced the
+ * room to INITIAL_POSITIONING once both are seated; this covers both the very first
+ * play and the PRE_PLAY entry after a resolved play.
  */
-async function startPlay(room: TestRoom, client: TestClient): Promise<void> {
+async function startPlay(room: TestRoom, clientA: TestClient, clientB: TestClient): Promise<void> {
   if (room.state.phase === 'LOBBY') await waitForPhase(room, 'INITIAL_POSITIONING');
   if (room.state.phase === 'INITIAL_POSITIONING') {
-    client.send('confirmPositioning');
+    clientA.send('confirmPositioning');
+    clientB.send('confirmPositioning');
     await waitForPhase(room, 'PRE_PLAY');
   }
   if (room.state.phase === 'PRE_PLAY') {
-    client.send('readyForPlay');
+    clientA.send('readyForPlay');
+    clientB.send('readyForPlay');
     await waitForPhase(room, 'PLAY');
   }
   if (room.state.phase !== 'PLAY') throw new Error(`startPlay left phase at ${room.state.phase}`);
@@ -84,33 +94,41 @@ async function waitNearPlane(room: TestRoom): Promise<void> {
   }
 }
 
-/** Pitch straight, poll until the ball nears the batting plane, then swing with the given aim. Must already be in PLAY. */
+/**
+ * Pitch straight from the fielding side, poll until the ball nears the batting
+ * plane, then swing with the given aim from the batting side. Both senders are
+ * resolved per-call (not bound once) so this works across innings switches. Must
+ * already be in PLAY.
+ */
 async function pitchThenSwing(
   room: TestRoom,
-  client: TestClient,
+  clientA: TestClient,
+  clientB: TestClient,
   aim: { x: number; y: number; z: number },
 ): Promise<void> {
-  client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+  fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
   await waitNearPlane(room);
-  client.send('swing', { timing: 0, aim, spinInput: 0 });
+  battingClient(room, clientA, clientB).send('swing', { timing: 0, aim, spinInput: 0 });
   await room.waitForNextSimulationTick();
 }
 
 /**
- * Pitch, then swing `lateTicks` after the ball nears the plane, aiming from the
- * ball's predicted one-tick-ahead contact point at `target` (server-authoritative,
- * read synchronously). `aimY` sets the vertical aim (default 0 = flat drive; a
- * large value is clamped by HitModule to +60°, a large negative to −10°). Must
- * already be in PLAY.
+ * Pitch (fielding side), then swing (batting side) `lateTicks` after the ball
+ * nears the plane, aiming from the ball's predicted one-tick-ahead contact point
+ * at `target` (server-authoritative, read synchronously). `aimY` sets the
+ * vertical aim (default 0 = flat drive; a large value is clamped by HitModule to
+ * +60°, a large negative to −10°). Both senders are resolved per-call (not bound
+ * once) so this works across innings switches. Must already be in PLAY.
  */
 async function pitchThenSwingAtTarget(
   room: TestRoom,
-  client: TestClient,
+  clientA: TestClient,
+  clientB: TestClient,
   target: { x: number; z: number },
   lateTicks: number,
   aimY = 0,
 ): Promise<void> {
-  client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+  fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
   await waitNearPlane(room);
   for (let i = 0; i < lateTicks; i += 1) {
     await room.waitForNextSimulationTick();
@@ -118,7 +136,11 @@ async function pitchThenSwingAtTarget(
   const dt = CONST.PHYSICS.FIXED_TIMESTEP;
   const cx = room.state.ball.x + room.state.ball.vx * dt;
   const cz = room.state.ball.z + room.state.ball.vz * dt;
-  client.send('swing', { timing: 0, aim: { x: target.x - cx, y: aimY, z: target.z - cz }, spinInput: 0 });
+  battingClient(room, clientA, clientB).send('swing', {
+    timing: 0,
+    aim: { x: target.x - cx, y: aimY, z: target.z - cz },
+    spinInput: 0,
+  });
   await room.waitForNextSimulationTick();
 }
 
@@ -195,18 +217,20 @@ describe('MatchRoom', () => {
 
   it('phase walk: join → INITIAL_POSITIONING → PRE_PLAY → PLAY → (caught) → PRE_PLAY with an out', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
-    const { clientA: client } = await connectPair(room);
+    const { clientA, clientB } = await connectPair(room);
 
     await waitForPhase(room, 'INITIAL_POSITIONING');
-    client.send('confirmPositioning');
+    clientA.send('confirmPositioning');
+    clientB.send('confirmPositioning');
     await waitForPhase(room, 'PRE_PLAY');
     expect(room.state.phase).toBe('PRE_PLAY');
-    client.send('readyForPlay');
+    clientA.send('readyForPlay');
+    clientB.send('readyForPlay');
     await waitForPhase(room, 'PLAY');
     expect(room.state.phase).toBe('PLAY');
 
     // Drive a caught out → resolves back to PRE_PLAY with outs incremented.
-    await pitchThenSwingAtTarget(room, client, FIELD.BOWLING_SQUARE, 0);
+    await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
     const res = await waitPlayEnd(room);
     expect(room.state.phase).toBe('PRE_PLAY');
     expect(res.cause.kind).toBe('caught');
@@ -218,9 +242,9 @@ describe('MatchRoom', () => {
 
   it('pitch while in PLAY makes the ball live with stat-derived speed', async () => {
     const room = await colyseus.createRoom('match', {});
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
-    client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
+    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
     for (let i = 0; i < 30; i += 1) {
       await room.waitForNextSimulationTick();
       if (room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0) break;
@@ -233,12 +257,12 @@ describe('MatchRoom', () => {
 
   it('rejects a second pitch while the ball is live', async () => {
     const room = await colyseus.createRoom('match', {});
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
-    client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
+    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
     await room.waitForNextSimulationTick();
     const before = { vx: room.state.ball.vx, vz: room.state.ball.vz };
-    client.send('pitch', { aim: { x: 1, y: 0, z: 0 }, spinInput: 1 });
+    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 1, y: 0, z: 0 }, spinInput: 1 });
     await room.waitForNextSimulationTick();
     expect(room.state.ball.vz).toBeLessThan(0);
     expect(Math.sign(room.state.ball.vx)).toBe(Math.sign(before.vx));
@@ -247,9 +271,9 @@ describe('MatchRoom', () => {
 
   it('rejects a swing when no ball is live', async () => {
     const room = await colyseus.createRoom('match', {});
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
-    client.send('swing', { timing: 0, aim: { x: 0.5, y: 0.3, z: 1 }, spinInput: 0 });
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
+    battingClient(room, clientA, clientB).send('swing', { timing: 0, aim: { x: 0.5, y: 0.3, z: 1 }, spinInput: 0 });
     await room.waitForNextSimulationTick();
     expect(room.state.ballLive).toBe(false);
     expect(room.state.lastRejection).toContain('swing');
@@ -257,9 +281,9 @@ describe('MatchRoom', () => {
 
   it('rejects a pitch message sent with no payload instead of crashing', async () => {
     const room = await colyseus.createRoom('match', {});
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
-    client.send('pitch');
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
+    fieldingClient(room, clientA, clientB).send('pitch');
     await room.waitForNextSimulationTick();
     expect(room.state.ballLive).toBe(false);
     expect(room.state.lastRejection).toContain('pitch');
@@ -267,9 +291,9 @@ describe('MatchRoom', () => {
 
   it('rejects a swing message sent with a null payload instead of crashing', async () => {
     const room = await colyseus.createRoom('match', {});
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
-    client.send('swing', null);
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
+    battingClient(room, clientA, clientB).send('swing', null);
     await room.waitForNextSimulationTick();
     expect(room.state.ballLive).toBe(false);
     expect(room.state.lastRejection).toContain('swing');
@@ -277,13 +301,13 @@ describe('MatchRoom', () => {
 
   it('stays responsive to a valid pitch after payload-less pitch/swing messages', async () => {
     const room = await colyseus.createRoom('match', {});
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
-    client.send('pitch');
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
+    fieldingClient(room, clientA, clientB).send('pitch');
     await room.waitForNextSimulationTick();
-    client.send('swing', null);
+    battingClient(room, clientA, clientB).send('swing', null);
     await room.waitForNextSimulationTick();
-    client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
     for (let i = 0; i < 30; i += 1) {
       await room.waitForNextSimulationTick();
       if (room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0) break;
@@ -296,11 +320,11 @@ describe('MatchRoom', () => {
 
   it('full loop: pitch, wait for plane crossing, swing connects and reverses flight', async () => {
     const room = await colyseus.createRoom('match', {});
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
-    client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
+    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
     await waitNearPlane(room);
-    client.send('swing', { timing: 0, aim: { x: 0.5, y: 0.3, z: 1 }, spinInput: 0 });
+    battingClient(room, clientA, clientB).send('swing', { timing: 0, aim: { x: 0.5, y: 0.3, z: 1 }, spinInput: 0 });
     await room.waitForNextSimulationTick();
     await room.waitForNextSimulationTick();
     expect(room.state.ball.vz).toBeGreaterThan(0);
@@ -312,9 +336,9 @@ describe('MatchRoom', () => {
 
   it('a connected hit starts a runner heading towards post 1', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
-    await pitchThenSwing(room, client, { x: 0.5, y: 0.3, z: 1 });
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
+    await pitchThenSwing(room, clientA, clientB, { x: 0.5, y: 0.3, z: 1 });
     await room.waitForNextSimulationTick();
     const runner = room.state.runners.get('carl');
     expect(runner).toBeDefined();
@@ -325,10 +349,10 @@ describe('MatchRoom', () => {
 
   it('runDecision {go:false} halts the runner at post 1, and the play ends safe there', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
-    await pitchThenSwing(room, client, { x: 0.5, y: 0.3, z: 1 });
-    client.send('runDecision', { go: false });
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
+    await pitchThenSwing(room, clientA, clientB, { x: 0.5, y: 0.3, z: 1 });
+    battingClient(room, clientA, clientB).send('runDecision', { go: false });
 
     let haltedAtPost1 = false;
     for (let i = 0; i < 600 && room.state.ballLive; i += 1) {
@@ -347,18 +371,19 @@ describe('MatchRoom', () => {
 
   it('rejects runDecision when no live ball, no active runner, or a malformed payload', async () => {
     const room = await colyseus.createRoom('match', {});
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
+    const batter = battingClient(room, clientA, clientB);
 
-    client.send('runDecision', { go: true });
+    batter.send('runDecision', { go: true });
     await room.waitForNextSimulationTick();
     expect(room.state.lastRejection).toContain('runDecision');
 
-    client.send('runDecision', { go: 'yes' });
+    batter.send('runDecision', { go: 'yes' });
     await room.waitForNextSimulationTick();
     expect(room.state.lastRejection).toContain('runDecision');
 
-    client.send('runDecision');
+    batter.send('runDecision');
     await room.waitForNextSimulationTick();
     expect(room.state.lastRejection).toContain('runDecision');
     expect(room.state.ballLive).toBe(false);
@@ -371,14 +396,14 @@ describe('MatchRoom', () => {
     if (post1 === undefined) throw new Error('no post 1 in fixture');
 
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
     let received: PlayResolution | null = null;
-    client.onMessage('playOutcome', (payload: PlayResolution) => {
+    clientA.onMessage('playOutcome', (payload: PlayResolution) => {
       received = payload;
     });
 
-    await pitchThenSwingAtTarget(room, client, post1, 0);
+    await pitchThenSwingAtTarget(room, clientA, clientB, post1, 0);
 
     const res = await waitPlayEnd(room, 200);
     await room.waitForNextSimulationTick(); // let the broadcast land
@@ -395,11 +420,11 @@ describe('MatchRoom', () => {
     const post2 = FIELD.POSTS[1];
     if (post2 === undefined) throw new Error('no post 2 in fixture');
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
 
-    await pitchThenSwingAtTarget(room, client, post2, 0);
-    client.send('runDecision', { go: false }); // halt at post 1
+    await pitchThenSwingAtTarget(room, clientA, clientB, post2, 0);
+    battingClient(room, clientA, clientB).send('runDecision', { go: false }); // halt at post 1
 
     let haltedAtPost1 = false;
     for (let i = 0; i < 240 && room.state.ballLive && !haltedAtPost1; i += 1) {
@@ -410,7 +435,7 @@ describe('MatchRoom', () => {
     expect(haltedAtPost1).toBe(true);
     expect(room.state.ballLive).toBe(true);
 
-    client.send('runDecision', { go: true }); // resume towards post 2 — the stale-latch moment
+    battingClient(room, clientA, clientB).send('runDecision', { go: true }); // resume towards post 2 — the stale-latch moment
     for (let i = 0; i < 60 && room.state.ballLive; i += 1) {
       await room.waitForNextSimulationTick();
     }
@@ -426,8 +451,8 @@ describe('MatchRoom', () => {
     const post2 = FIELD.POSTS[1];
     if (post2 === undefined) throw new Error('no post 2 in fixture');
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
 
     // A near-plane (reliable, factor≈1) LOW −10° drive aimed at post 2: it blasts
     // through post 2's run-out sensor while Carl is still heading to post 1
@@ -439,10 +464,10 @@ describe('MatchRoom', () => {
     // hit that instead arrives during the halt is jitter-unreliable under the
     // test harness's fixed-timer catch-up; this strong low drive exercises the
     // same exposure-window latch-clear guard deterministically.)
-    await pitchThenSwingAtTarget(room, client, post2, 0, -1000);
+    await pitchThenSwingAtTarget(room, clientA, clientB, post2, 0, -1000);
     for (let i = 0; i < 6 && room.state.runners.size === 0; i += 1) await room.waitForNextSimulationTick();
     expect(room.state.runners.size).toBeGreaterThan(0); // the drive connected
-    client.send('runDecision', { go: false }); // halt at post 1
+    battingClient(room, clientA, clientB).send('runDecision', { go: false }); // halt at post 1
 
     let halted = false;
     for (let i = 0; i < 300 && room.state.ballLive && !halted; i += 1) {
@@ -461,7 +486,7 @@ describe('MatchRoom', () => {
     }
 
     if (passed) {
-      client.send('runDecision', { go: true }); // exposure flips null → 2 between ticks
+      battingClient(room, clientA, clientB).send('runDecision', { go: true }); // exposure flips null → 2 between ticks
       for (let i = 0; i < 240 && room.state.ballLive; i += 1) {
         await room.waitForNextSimulationTick();
       }
@@ -477,14 +502,14 @@ describe('MatchRoom', () => {
 
   it('a hit flown straight at the bowler is caught (pre-bounce) → the batter is out', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
     let received: PlayResolution | null = null;
-    client.onMessage('playOutcome', (payload: PlayResolution) => {
+    clientA.onMessage('playOutcome', (payload: PlayResolution) => {
       received = payload;
     });
 
-    await pitchThenSwingAtTarget(room, client, FIELD.BOWLING_SQUARE, 0);
+    await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
 
     const res = await waitPlayEnd(room, 120);
     await room.waitForNextSimulationTick();
@@ -504,14 +529,14 @@ describe('MatchRoom', () => {
     };
     const room = await colyseus.createRoom('match', { rng: corridorGatherRng });
     roomRef = room;
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
     let received: PlayResolution | null = null;
-    client.onMessage('playOutcome', (payload: PlayResolution) => {
+    clientA.onMessage('playOutcome', (payload: PlayResolution) => {
       received = payload;
     });
 
-    await pitchThenSwingAtTarget(room, client, FIELD.BOWLING_SQUARE, 0, -1000);
+    await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0, -1000);
 
     const holders = new Set<string>();
     for (let i = 0; i < 180 && room.state.phase === 'PLAY'; i += 1) {
@@ -534,9 +559,9 @@ describe('MatchRoom', () => {
 
   it('rejects every message out of its phase, broadcasting a structured { message, phase, reason }', async () => {
     const room = await colyseus.createRoom('match', {});
-    const { clientA: client } = await connectPair(room);
+    const { clientA, clientB } = await connectPair(room);
     const rejects: { message: string; phase: MatchPhase; reason: string }[] = [];
-    client.onMessage('rejected', (p: { message: string; phase: MatchPhase; reason: string }) => rejects.push(p));
+    clientA.onMessage('rejected', (p: { message: string; phase: MatchPhase; reason: string }) => rejects.push(p));
 
     async function expectReject(send: () => void, message: string, phase: MatchPhase): Promise<void> {
       const before = rejects.length;
@@ -551,23 +576,29 @@ describe('MatchRoom', () => {
     }
 
     await waitForPhase(room, 'INITIAL_POSITIONING');
-    // In INITIAL_POSITIONING: pitch/swing/runDecision/readyForPlay/rematch all illegal.
-    await expectReject(() => client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 }), 'pitch', 'INITIAL_POSITIONING');
-    await expectReject(() => client.send('readyForPlay'), 'readyForPlay', 'INITIAL_POSITIONING');
-    await expectReject(() => client.send('rematch'), 'rematch', 'INITIAL_POSITIONING');
+    // In INITIAL_POSITIONING: pitch/swing/runDecision/readyForPlay/rematch all illegal
+    // (phase check runs before the role check, so the out-of-phase reason wins
+    // regardless of which client sends).
+    await expectReject(() => clientA.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 }), 'pitch', 'INITIAL_POSITIONING');
+    await expectReject(() => clientA.send('readyForPlay'), 'readyForPlay', 'INITIAL_POSITIONING');
+    await expectReject(() => clientA.send('rematch'), 'rematch', 'INITIAL_POSITIONING');
 
-    client.send('confirmPositioning');
+    clientA.send('confirmPositioning');
+    clientB.send('confirmPositioning');
     await waitForPhase(room, 'PRE_PLAY');
     // In PRE_PLAY: pitch/swing/confirmPositioning illegal.
-    await expectReject(() => client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 }), 'pitch', 'PRE_PLAY');
-    await expectReject(() => client.send('confirmPositioning'), 'confirmPositioning', 'PRE_PLAY');
+    await expectReject(() => clientA.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 }), 'pitch', 'PRE_PLAY');
+    await expectReject(() => clientA.send('confirmPositioning'), 'confirmPositioning', 'PRE_PLAY');
 
-    client.send('readyForPlay');
+    clientA.send('readyForPlay');
+    clientB.send('readyForPlay');
     await waitForPhase(room, 'PLAY');
-    // In PLAY: readyForPlay/confirmPositioning/rematch illegal; payload-less pitch malformed.
-    await expectReject(() => client.send('readyForPlay'), 'readyForPlay', 'PLAY');
-    await expectReject(() => client.send('rematch'), 'rematch', 'PLAY');
-    await expectReject(() => client.send('pitch'), 'pitch', 'PLAY');
+    // In PLAY: readyForPlay/confirmPositioning/rematch illegal; a payload-less
+    // pitch from the FIELDING side (clientB — side A bats first) is malformed,
+    // not wrongRole.
+    await expectReject(() => clientA.send('readyForPlay'), 'readyForPlay', 'PLAY');
+    await expectReject(() => clientA.send('rematch'), 'rematch', 'PLAY');
+    await expectReject(() => fieldingClient(room, clientA, clientB).send('pitch'), 'pitch', 'PLAY');
   }, 20000);
 
   // ---- Scoring / outs ------------------------------------------------------
@@ -581,14 +612,14 @@ describe('MatchRoom', () => {
     // half-rounder (post ≥ 2 = +1 half), which exercises the same
     // settlePlay → resolvePlay → scoreHalves wiring. See task-5 report / TUNING.
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
 
     // A max-elevation (+60°) hard hit up the +z line: the ball hangs high, well
     // over every post (above POST_HEIGHT), and lands far downfield — never near a
     // post at low altitude, so no accidental run-out — while the play runs to the
     // 6 s timeout and Carl (auto-running through the posts) reaches post 2/3.
-    await pitchThenSwingAtTarget(room, client, { x: 0, z: 30 }, 0, 1000);
+    await pitchThenSwingAtTarget(room, clientA, clientB, { x: 0, z: 30 }, 0, 1000);
     const res = await waitPlayEnd(room);
 
     expect(res.cause.kind).not.toBe('runOut');
@@ -603,9 +634,9 @@ describe('MatchRoom', () => {
 
   it('a caught batter increments the batting side outs', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
-    await pitchThenSwingAtTarget(room, client, FIELD.BOWLING_SQUARE, 0);
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
+    await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
     const res = await waitPlayEnd(room, 120);
     expect(res.cause.kind).toBe('caught');
     expect(room.state.outs).toBe(1);
@@ -616,12 +647,12 @@ describe('MatchRoom', () => {
 
   it('two runners are visible in the schema after a play where the first parked safe', async () => {
     const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const { clientA: client } = await connectPair(room);
+    const { clientA, clientB } = await connectPair(room);
 
     // Play 1: Carl halts safe at post 1 and parks there.
-    await startPlay(room, client);
-    await pitchThenSwing(room, client, { x: 0.5, y: 0.3, z: 1 });
-    client.send('runDecision', { go: false });
+    await startPlay(room, clientA, clientB);
+    await pitchThenSwing(room, clientA, clientB, { x: 0.5, y: 0.3, z: 1 });
+    battingClient(room, clientA, clientB).send('runDecision', { go: false });
     for (let i = 0; i < 600 && room.state.ballLive; i += 1) {
       await room.waitForNextSimulationTick();
     }
@@ -631,8 +662,8 @@ describe('MatchRoom', () => {
     expect(nextBatter).not.toBe('carl');
 
     // Play 2: the next batter hits and starts running — now two runners exist.
-    await startPlay(room, client);
-    await pitchThenSwing(room, client, { x: 0.5, y: 0.3, z: 1 });
+    await startPlay(room, clientA, clientB);
+    await pitchThenSwing(room, clientA, clientB, { x: 0.5, y: 0.3, z: 1 });
     await room.waitForNextSimulationTick();
     expect(room.state.runners.size).toBe(2);
     expect(room.state.runners.get('carl')).toBeDefined();
@@ -650,15 +681,15 @@ describe('MatchRoom', () => {
     let scoringPlay = true;
     const rng = (): number => (scoringPlay ? 0.999 : 0);
     const room = await colyseus.createRoom('match', { rng });
-    const { clientA: client } = await connectPair(room);
+    const { clientA, clientB } = await connectPair(room);
 
     let plays = 0;
     while (room.state.phase !== 'GAME_OVER' && plays < 60) {
-      await startPlay(room, client);
+      await startPlay(room, clientA, clientB);
       if (scoringPlay) {
-        await pitchThenSwingAtTarget(room, client, { x: 0, z: 30 }, 0, 1000);
+        await pitchThenSwingAtTarget(room, clientA, clientB, { x: 0, z: 30 }, 0, 1000);
       } else {
-        await pitchThenSwingAtTarget(room, client, FIELD.BOWLING_SQUARE, 0);
+        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
       }
       await waitPlayEnd(room);
       // Flip to guaranteed-catch only AFTER the scoring play fully resolves — the
@@ -677,15 +708,15 @@ describe('MatchRoom', () => {
     let scoringPlay = true;
     const rng = (): number => (scoringPlay ? 0.999 : 0);
     const room = await colyseus.createRoom('match', { rng });
-    const { clientA: client } = await connectPair(room);
+    const { clientA, clientB } = await connectPair(room);
 
     let plays = 0;
     while (room.state.phase !== 'GAME_OVER' && plays < 60) {
-      await startPlay(room, client);
+      await startPlay(room, clientA, clientB);
       if (scoringPlay) {
-        await pitchThenSwingAtTarget(room, client, { x: 0, z: 30 }, 0, 1000);
+        await pitchThenSwingAtTarget(room, clientA, clientB, { x: 0, z: 30 }, 0, 1000);
       } else {
-        await pitchThenSwingAtTarget(room, client, FIELD.BOWLING_SQUARE, 0);
+        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
       }
       await waitPlayEnd(room);
       scoringPlay = false;
@@ -693,7 +724,7 @@ describe('MatchRoom', () => {
     }
     expect(room.state.phase).toBe('GAME_OVER');
 
-    client.send('rematch');
+    clientA.send('rematch');
     await waitForPhase(room, 'INITIAL_POSITIONING');
     expect(room.state.phase).toBe('INITIAL_POSITIONING');
     expect(room.state.scoreHalvesA).toBe(0);
@@ -709,10 +740,10 @@ describe('MatchRoom', () => {
     const errorSpy = vi.spyOn(console, 'error');
     const garbage = { rng: 1, seed: 'not-a-number' } as unknown as Record<string, unknown>;
     const room = await colyseus.createRoom('match', garbage);
-    const { clientA: client } = await connectPair(room);
-    await startPlay(room, client);
+    const { clientA, clientB } = await connectPair(room);
+    await startPlay(room, clientA, clientB);
 
-    client.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
     for (let i = 0; i < 30; i += 1) {
       await room.waitForNextSimulationTick();
       if (room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0) break;
@@ -723,7 +754,7 @@ describe('MatchRoom', () => {
     expect(speed).toBeLessThan(27);
 
     await waitNearPlane(room);
-    client.send('swing', { timing: 0, aim: { x: 0, y: 0, z: 1 }, spinInput: 0 });
+    battingClient(room, clientA, clientB).send('swing', { timing: 0, aim: { x: 0, y: 0, z: 1 }, spinInput: 0 });
     for (let i = 0; i < 600 && room.state.phase === 'PLAY'; i += 1) {
       await room.waitForNextSimulationTick();
     }
@@ -735,6 +766,56 @@ describe('MatchRoom', () => {
     );
     expect(uncaught).toEqual([]);
   }, 30000);
+
+  // ---- M6: role gating -------------------------------------------------------
+
+  describe('M6 role gating', () => {
+    it('rejects a pitch from the batting side and accepts it from the fielding side', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await startPlay(room, clientA, clientB);
+      // Side A bats first (battingSide 'A' at match start) → A may NOT pitch.
+      clientA.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+      await room.waitForNextSimulationTick();
+      expect(room.state.ballLive).toBe(false);
+      expect(JSON.parse(room.state.lastRejection).reason).toBe('wrongRole');
+      clientB.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+      await room.waitForNextSimulationTick();
+      expect(room.state.ballLive).toBe(true);
+    });
+
+    it('rejects swing and runDecision from the fielding side', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await startPlay(room, clientA, clientB);
+      clientB.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+      await waitNearPlane(room);
+      clientB.send('swing', { timing: 0, aim: { x: 0.55, y: 0.47, z: 0.65 }, spinInput: 0 });
+      await room.waitForNextSimulationTick();
+      expect(JSON.parse(room.state.lastRejection).reason).toBe('wrongRole');
+      clientB.send('runDecision', { go: false });
+      await room.waitForNextSimulationTick();
+      expect(JSON.parse(room.state.lastRejection).reason).toBe('wrongRole');
+    });
+
+    it('requires BOTH sides to confirm positioning and ready up (duplicates idempotent)', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'INITIAL_POSITIONING');
+      clientA.send('confirmPositioning');
+      clientA.send('confirmPositioning'); // duplicate: accepted, no transition, no rejection
+      for (let i = 0; i < 10; i += 1) await room.waitForNextSimulationTick();
+      expect(room.state.phase).toBe('INITIAL_POSITIONING');
+      expect(room.state.lastRejection).toBe('');
+      clientB.send('confirmPositioning');
+      await waitForPhase(room, 'PRE_PLAY');
+      clientB.send('readyForPlay');
+      for (let i = 0; i < 10; i += 1) await room.waitForNextSimulationTick();
+      expect(room.state.phase).toBe('PRE_PLAY');
+      clientA.send('readyForPlay');
+      await waitForPhase(room, 'PLAY');
+    });
+  });
 
   // ---- M6: seats, room code, real lobby wait -------------------------------
 

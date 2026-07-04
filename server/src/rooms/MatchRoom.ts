@@ -10,6 +10,7 @@ import {
   type PlayOutcome,
   type RunDecisionInput,
   type SwingInput,
+  type TeamSide,
 } from '@carlquest/shared';
 import { createPhysicsModule, type PhysicsModule } from '../modules/PhysicsModule';
 import { resolvePitch } from '../modules/PitchModule';
@@ -132,6 +133,20 @@ export class MatchRoom extends Room<MatchState> {
    * checkRunOut and CLAUDE.md §6.2/§6.4 — both snapshot guards are load-bearing.
    */
   private lastExposedPosts: Set<number> = new Set();
+  /** Per-side confirmations for the current INITIAL_POSITIONING / PRE_PLAY gate. */
+  private confirmed: Record<TeamSide, boolean> = { A: false, B: false };
+  private ready: Record<TeamSide, boolean> = { A: false, B: false };
+
+  /** Which seat a message came from; null = not seated (defensive — reject). */
+  private sideOf(client: Client): TeamSide | null {
+    if (client.sessionId === this.state.sessionA) return 'A';
+    if (client.sessionId === this.state.sessionB) return 'B';
+    return null;
+  }
+
+  private fieldingSide(): TeamSide {
+    return this.rules.view().battingSide === 'A' ? 'B' : 'A';
+  }
 
   override async onCreate(options: MatchRoomOptions = {}): Promise<void> {
     // The room code is client-generated (filterBy matches CREATION options; a
@@ -171,9 +186,9 @@ export class MatchRoom extends Room<MatchState> {
     this.onMessage('pitch', (client, message) => this.handlePitch(client, message));
     this.onMessage('swing', (client, message) => this.handleSwing(client, message));
     this.onMessage('runDecision', (client, message) => this.handleRunDecision(client, message));
-    this.onMessage('confirmPositioning', () => this.handleConfirmPositioning());
-    this.onMessage('readyForPlay', () => this.handleReadyForPlay());
-    this.onMessage('rematch', () => this.handleRematch());
+    this.onMessage('confirmPositioning', (client) => this.handleConfirmPositioning(client));
+    this.onMessage('readyForPlay', (client) => this.handleReadyForPlay(client));
+    this.onMessage('rematch', (client) => this.handleRematch(client));
 
     this.setSimulationInterval((deltaMs) => this.tick(deltaMs), 1000 / 60);
   }
@@ -246,9 +261,13 @@ export class MatchRoom extends Room<MatchState> {
 
   // ---- Message handlers ------------------------------------------------------
 
-  private handlePitch(_client: Client, message: unknown): void {
+  private handlePitch(client: Client, message: unknown): void {
     if (this.phase() !== 'PLAY') {
       this.reject('pitch', `pitch only allowed in PLAY (phase ${this.phase()})`);
+      return;
+    }
+    if (this.sideOf(client) !== this.fieldingSide()) {
+      this.reject('pitch', 'wrongRole');
       return;
     }
     const m = asRecord(message) as Partial<PitchInput>;
@@ -268,9 +287,13 @@ export class MatchRoom extends Room<MatchState> {
     this.restSince = null;
   }
 
-  private handleSwing(_client: Client, message: unknown): void {
+  private handleSwing(client: Client, message: unknown): void {
     if (this.phase() !== 'PLAY') {
       this.reject('swing', `swing only allowed in PLAY (phase ${this.phase()})`);
+      return;
+    }
+    if (this.sideOf(client) !== this.rules.view().battingSide) {
+      this.reject('swing', 'wrongRole');
       return;
     }
     const m = asRecord(message) as Partial<SwingMessage>;
@@ -308,9 +331,13 @@ export class MatchRoom extends Room<MatchState> {
     this.lastExposedPosts = new Set(this.running.exposures().map((e) => e.post));
   }
 
-  private handleRunDecision(_client: Client, message: unknown): void {
+  private handleRunDecision(client: Client, message: unknown): void {
     if (this.phase() !== 'PLAY') {
       this.reject('runDecision', `runDecision only allowed in PLAY (phase ${this.phase()})`);
+      return;
+    }
+    if (this.sideOf(client) !== this.rules.view().battingSide) {
+      this.reject('runDecision', 'wrongRole');
       return;
     }
     const m = asRecord(message) as Partial<RunDecisionInput>;
@@ -323,23 +350,47 @@ export class MatchRoom extends Room<MatchState> {
     this.running.setDecision(m.go);
   }
 
-  private handleConfirmPositioning(): void {
-    if (!this.rules.confirmPositioning()) {
+  private handleConfirmPositioning(client: Client): void {
+    const side = this.sideOf(client);
+    if (side === null) {
+      this.reject('confirmPositioning', 'wrongRole');
+      return;
+    }
+    if (this.phase() !== 'INITIAL_POSITIONING') {
       this.reject('confirmPositioning', `only allowed in INITIAL_POSITIONING (phase ${this.phase()})`);
       return;
     }
-    this.syncRulesView();
+    this.confirmed[side] = true; // duplicate confirm is idempotent, not a rejection
+    if (this.confirmed.A && this.confirmed.B) {
+      this.rules.confirmPositioning();
+      this.confirmed = { A: false, B: false };
+      this.syncRulesView();
+    }
   }
 
-  private handleReadyForPlay(): void {
-    if (!this.rules.readyForPlay()) {
+  private handleReadyForPlay(client: Client): void {
+    const side = this.sideOf(client);
+    if (side === null) {
+      this.reject('readyForPlay', 'wrongRole');
+      return;
+    }
+    if (this.phase() !== 'PRE_PLAY') {
       this.reject('readyForPlay', `only allowed in PRE_PLAY (phase ${this.phase()})`);
       return;
     }
-    this.syncRulesView();
+    this.ready[side] = true;
+    if (this.ready.A && this.ready.B) {
+      this.rules.readyForPlay();
+      this.ready = { A: false, B: false };
+      this.syncRulesView();
+    }
   }
 
-  private handleRematch(): void {
+  private handleRematch(client: Client): void {
+    if (this.sideOf(client) === null) {
+      this.reject('rematch', 'wrongRole');
+      return;
+    }
     if (!this.rules.rematch()) {
       this.reject('rematch', `only allowed in GAME_OVER (phase ${this.phase()})`);
       return;
@@ -354,6 +405,8 @@ export class MatchRoom extends Room<MatchState> {
     this.restSince = null;
     this.lastExposedPosts = new Set();
     this.state.lastOutcome = '';
+    this.confirmed = { A: false, B: false };
+    this.ready = { A: false, B: false };
     this.syncRulesView();
     this.syncRunners();
     this.syncFielders();
@@ -534,6 +587,8 @@ export class MatchRoom extends Room<MatchState> {
     this.fielding.reset();
     this.restSince = null;
     this.lastExposedPosts = new Set();
+    this.confirmed = { A: false, B: false };
+    this.ready = { A: false, B: false };
 
     if (resolution === null) {
       // Defensive: resolvePlay only returns null out of PLAY / with no batter,
