@@ -38,6 +38,21 @@ elsewhere.
 |----------|---------------|----------|---------------------|
 | `GAME.RECONNECT_GRACE_S` | `60` (s) | How long a mid-game disconnect pauses the match (simulation frozen, seat held) before the survivor is told the opponent left and the room disposes. | Pure first guess. Too short → a router blip ends real matches; too long → the survivor is hostage to a rage-quit that closed the tab uncleanly (no consented leave). Judge against real remote play: if most genuine drops reconnect within ~15 s, cut it; consider surfacing a countdown in the M10 UI before tuning further. Tests override via the `reconnectGraceS` room option rather than this constant. |
 
+## Milestone 8 — Positioning (introduced 2026-07-04)
+
+| Constant | Current value | Controls | Playtest watch-list |
+|----------|---------------|----------|---------------------|
+| `FIELD.LEGAL_ZONE` | `{minX: -20, maxX: 20, minZ: -6, maxZ: 32}` | Rectangular area a fielder may be repositioned into. | Placeholder like the rest of the field geometry — sized to contain the posts, the 9 default slots and a modest deep field within `GROUND_HALF_EXTENT` 40. If deep lofted hits routinely land beyond `maxZ` 32 un-fieldably, extend it (or shrink hit distances); if players park a wall of fielders on the boundary, consider a max-per-region rule rather than shrinking the zone. Tune together with the post coordinates. |
+| `FIELD.BATTING_SQUARE_KEEPOUT` | `3` (m) | Minimum distance a repositioned fielder must keep from the batting square (exclusive: `dist > 3`; the backstop's DEFAULT slot at (0,−3) is exactly on the boundary and stays legal only because defaults aren't validated — moving him needs a spot outside 3 m). | Too small → a fielder camps the batter and swallows every flat drive off the bat; too large → no meaningful backstop/close-catcher play. 3 m is a first guess; judge against how often sub-5 m catches decide plays. |
+
+- **Pitcher-change slot-0 overlap (M8, design-inherent).** Nominating a new
+  bowler pins them to `PITCHING_SPOT`, but the displaced ex-pitcher's persisted
+  layout position is still the bowling square (slot 0) — the two stand stacked
+  until the fielding side manually repositions the ex-pitcher (CLAUDE.md §6.2).
+  If playtest shows players never notice the stack, consider a UI nudge (or an
+  auto-offset of a metre or two) rather than a rules change — any auto-placement
+  invents a rule the spec doesn't give.
+
 ## Carried over from earlier milestones
 
 - **Max-power hit vs `PLAY_TIMEOUT_S` (M3).** A max-power 60°-elevation hit flies

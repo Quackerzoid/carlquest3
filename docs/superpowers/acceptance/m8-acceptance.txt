@@ -1,0 +1,131 @@
+[0.0s] === ROOM 1 (9 field slots): reposition, rejections, layout persistence across innings ===
+[0.1s] OK: code join landed in room 0NK6oiVjV
+[0.3s] phase: (joining) → DRAFT | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[0.8s] phase: DRAFT → INITIAL_POSITIONING | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[0.8s] OK: squad A = carl,laurie,joel,jonty,joe
+[0.8s] OK: squad B = kian,josh,darcy,robbie,ricy
+[0.8s] OK: five-a-side squads with 9 slots: both benches empty
+[0.8s] OK: innings 1 default: fielders are darcy,josh,kian,ricy,robbie — got darcy,josh,kian,ricy,robbie
+[0.8s] OK: innings 1 default: currentPitcherId = kian (got 'kian')
+[0.8s] OK: innings 1 default: kian stands on the pitching spot (0, 7.5)
+[0.8s] OK: default layout: josh at (0, -3) — got (0, -3)
+[0.8s] wrong-role demo: batting side A sends reposition {id:'josh', x:5, z:20}
+[0.8s] rejected→A: {"message":"reposition","phase":"INITIAL_POSITIONING","reason":"wrongRole"}
+[0.9s] OK: batting-side reposition rejected with exactly 'wrongRole' (got 'wrongRole')
+[0.9s] pitcher demo: fielding side B tries to reposition the bowler kian
+[0.9s] rejected→B: {"message":"reposition","phase":"INITIAL_POSITIONING","reason":"the pitcher moves via setPitcher"}
+[0.9s] OK: pitcher reposition rejected with the setPitcher prose (got 'the pitcher moves via setPitcher')
+[0.9s] out-of-zone demo: B tries josh → (999, 20)
+[0.9s] rejected→B: {"message":"reposition","phase":"INITIAL_POSITIONING","reason":"illegal spot or not an on-field fielder"}
+[0.9s] OK: out-of-zone rejected with the illegal-spot prose (got 'illegal spot or not an on-field fielder')
+[0.9s] keep-out demo: B tries josh → (1, 1), 1.41 m from the batting square
+[0.9s] rejected→B: {"message":"reposition","phase":"INITIAL_POSITIONING","reason":"illegal spot or not an on-field fielder"}
+[0.9s] OK: keep-out rejected with the illegal-spot prose (got 'illegal spot or not an on-field fielder')
+[0.9s] OK: after the four rejections: josh at (0, -3) — got (0, -3)
+[0.9s] fielding side B repositions josh → (5, 20)
+[1.0s] OK: after reposition: josh at (5, 20) — got (5, 20)
+[1.0s] phase: INITIAL_POSITIONING → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[1.1s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[1.1s] OK: custom position survives into PLAY: josh at (5, 20) — got (5, 20)
+[1.1s] phase-lock demo: B tries a reposition during PLAY
+[1.1s] rejected→B: {"message":"reposition","phase":"PLAY","reason":"only allowed in INITIAL_POSITIONING or PRE_PLAY (phase PLAY)"}
+[1.1s] OK: PLAY-locked reposition rejected with the phase prose (got 'only allowed in INITIAL_POSITIONING or PRE_PLAY (phase PLAY)')
+[1.1s] OK: unchanged by the PLAY-phase attempt: josh at (5, 20) — got (5, 20)
+[1.1s] === driving innings to the switches (M7 loop) ===
+[4.2s] playOutcome→A: {"cause":{"kind":"caught","by":"josh"},"outs":["carl"],"scoreDeltaHalves":0,"batterId":"carl"}
+[4.2s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 1 | batting A | batter laurie
+[4.2s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 1 | batting A | batter laurie
+[7.3s] playOutcome→A: {"cause":{"kind":"caught","by":"josh"},"outs":["laurie"],"scoreDeltaHalves":0,"batterId":"laurie"}
+[7.3s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 2 | batting A | batter joel
+[7.4s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 2 | batting A | batter joel
+[13.4s] playOutcome→A: {"cause":{"kind":"safe","atPost":2,"runnerId":"joel"},"outs":[],"scoreDeltaHalves":1,"batterId":"joel"}
+[13.4s] phase: PLAY → PRE_PLAY | A 1½ – B 0½ | innings 1 | outs 2 | batting A | batter jonty
+[13.5s] phase: PRE_PLAY → PLAY | A 1½ – B 0½ | innings 1 | outs 2 | batting A | batter jonty
+[19.5s] playOutcome→A: {"cause":{"kind":"safe","atPost":2,"runnerId":"jonty"},"outs":[],"scoreDeltaHalves":1,"batterId":"jonty"}
+[19.5s] phase: PLAY → PRE_PLAY | A 2½ – B 0½ | innings 1 | outs 2 | batting A | batter joe
+[19.6s] phase: PRE_PLAY → PLAY | A 2½ – B 0½ | innings 1 | outs 2 | batting A | batter joe
+[21.2s] playOutcome→A: {"cause":{"kind":"caught","by":"kian"},"outs":["joe"],"scoreDeltaHalves":0,"batterId":"joe"}
+[21.2s] phase: PLAY → PRE_PLAY | A 2½ – B 0½ | innings 1 | outs 3 | batting A | batter joel
+[21.3s] phase: PRE_PLAY → PLAY | A 2½ – B 0½ | innings 1 | outs 3 | batting A | batter joel
+[23.7s] playOutcome→A: {"cause":{"kind":"caught","by":"ricy"},"outs":["joel"],"scoreDeltaHalves":0,"batterId":"joel"}
+[23.7s] phase: PLAY → PRE_PLAY | A 2½ – B 0½ | innings 2 | outs 0 | batting B | batter kian
+[23.7s] OK: innings 2 switch (A fields): fielders are carl,joe,joel,jonty,laurie — got carl,joe,joel,jonty,laurie
+[23.7s] OK: innings 2 switch (A fields): currentPitcherId = joel (got 'joel')
+[23.7s] OK: innings 2 switch (A fields): joel stands on the pitching spot (0, 7.5)
+[23.8s] phase: PRE_PLAY → PLAY | A 2½ – B 0½ | innings 2 | outs 0 | batting B | batter kian
+[24.7s] playOutcome→A: {"cause":{"kind":"runOut","atPost":1,"runnerId":"kian"},"outs":["kian"],"scoreDeltaHalves":0,"batterId":"kian"}
+[24.8s] phase: PLAY → PRE_PLAY | A 2½ – B 0½ | innings 2 | outs 1 | batting B | batter josh
+[24.8s] phase: PRE_PLAY → PLAY | A 2½ – B 0½ | innings 2 | outs 1 | batting B | batter josh
+[25.2s] playOutcome→A: {"cause":{"kind":"caught","by":"carl"},"outs":["josh"],"scoreDeltaHalves":0,"batterId":"josh"}
+[25.2s] phase: PLAY → PRE_PLAY | A 2½ – B 0½ | innings 2 | outs 2 | batting B | batter darcy
+[25.3s] phase: PRE_PLAY → PLAY | A 2½ – B 0½ | innings 2 | outs 2 | batting B | batter darcy
+[31.3s] playOutcome→A: {"cause":{"kind":"safe","atPost":1,"runnerId":"darcy"},"outs":[],"scoreDeltaHalves":0,"batterId":"darcy"}
+[31.3s] phase: PLAY → PRE_PLAY | A 2½ – B 0½ | innings 2 | outs 2 | batting B | batter robbie
+[31.4s] phase: PRE_PLAY → PLAY | A 2½ – B 0½ | innings 2 | outs 2 | batting B | batter robbie
+[31.8s] playOutcome→A: {"cause":{"kind":"caught","by":"carl"},"outs":["robbie"],"scoreDeltaHalves":0,"batterId":"robbie"}
+[31.8s] phase: PLAY → PRE_PLAY | A 2½ – B 0½ | innings 2 | outs 3 | batting B | batter ricy
+[31.8s] phase: PRE_PLAY → PLAY | A 2½ – B 0½ | innings 2 | outs 3 | batting B | batter ricy
+[32.2s] playOutcome→A: {"cause":{"kind":"caught","by":"carl"},"outs":["ricy"],"scoreDeltaHalves":0,"batterId":"ricy"}
+[32.2s] phase: PLAY → PRE_PLAY | A 2½ – B 0½ | innings 3 | outs 0 | batting A | batter carl
+[32.2s] plays driven: 11
+[32.2s] OK: reached innings 3 (B fields again) — inningsIndex 2
+[32.2s] OK: innings 3 switch (B fields again, default pitcher re-derived): fielders are darcy,josh,kian,ricy,robbie — got darcy,josh,kian,ricy,robbie
+[32.2s] OK: innings 3 switch (B fields again, default pitcher re-derived): currentPitcherId = kian (got 'kian')
+[32.2s] OK: innings 3 switch (B fields again, default pitcher re-derived): kian stands on the pitching spot (0, 7.5)
+[32.2s] OK: B's CUSTOM layout returned when B fields again: josh at (5, 20) — got (5, 20)
+[32.7s] === ROOM 2 (fieldSlotsOverride: 3): bench, substitutions, pitcher re-derivation, stamina ledger, setBatter ===
+[32.8s] OK: code join landed in room rhjh8bO8E
+[32.9s] phase: (joining) → DRAFT | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[33.5s] phase: DRAFT → INITIAL_POSITIONING | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[33.5s] OK: squad A = carl,laurie,joel,jonty,joe
+[33.5s] OK: squad B = kian,josh,darcy,robbie,ricy
+[33.5s] OK: benchB = robbie,ricy (got robbie,ricy)
+[33.5s] OK: benchA = jonty,joe (got jonty,joe)
+[33.5s] OK: subsUsedB starts at 0
+[33.5s] OK: 3-slot innings 1 default: fielders are darcy,josh,kian — got darcy,josh,kian
+[33.5s] OK: 3-slot innings 1 default: currentPitcherId = kian (got 'kian')
+[33.5s] OK: 3-slot innings 1 default: kian stands on the pitching spot (0, 7.5)
+[33.5s] OK: first batter is carl (got 'carl')
+[33.5s] OK: queue = laurie,joel,jonty,joe (got laurie,joel,jonty,joe)
+[33.5s] fielding side B tries setBatter {id:'joe'} (wrong role)
+[33.5s] rejected→B: {"message":"setBatter","phase":"INITIAL_POSITIONING","reason":"wrongRole"}
+[33.5s] OK: fielding-side setBatter rejected with exactly 'wrongRole' (got 'wrongRole')
+[33.5s] batting side A sends setBatter {id:'joe'}
+[33.5s] OK: displaced carl heads the queue (got 'carl')
+[33.5s] restoring carl via a second setBatter (also proves re-selection)
+[33.6s] OK: displaced joe heads the queue (got 'joe')
+[33.6s] fielding side B sends substitute {outId:'josh', inId:'ricy'}
+[33.7s] OK: benchB = robbie,josh after the sub (got robbie,josh)
+[33.7s] OK: after josh→ricy: fielders are darcy,kian,ricy — got darcy,kian,ricy
+[33.7s] OK: after josh→ricy: currentPitcherId = kian (got 'kian')
+[33.7s] OK: after josh→ricy: kian stands on the pitching spot (0, 7.5)
+[33.7s] OK: ricy inherits josh's position: ricy at (0, -3) — got (0, -3)
+[33.7s] B nominates darcy as bowler, then tries the BENCHED josh
+[33.7s] OK: nominated darcy pinned to the pitching spot: darcy at (0, 7.5) — got (0, 7.5)
+[33.7s] rejected→B: {"message":"setPitcher","phase":"INITIAL_POSITIONING","reason":"benched — substitute them on before nominating"}
+[33.8s] OK: benched setPitcher nominee rejected with the bench prose (got 'benched — substitute them on before nominating')
+[33.8s] OK: pitcher unchanged by the benched nomination
+[33.8s] B subs the BOWLER out (darcy→josh): the pitcher must re-derive to the on-field default
+[33.8s] OK: pitcher re-derived to on-field default kian (got 'kian')
+[33.8s] OK: benchB = robbie,darcy (got robbie,darcy)
+[33.8s] repositioning ricy → (2, 22) as chase bait for the lofted hit
+[33.9s] play 1: lofted hit into the deep field (runner told to stop) — a fielder must sprint and drain
+[33.9s] phase: INITIAL_POSITIONING → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[34.0s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[40.0s] playOutcome→A: {"cause":{"kind":"safe","atPost":1,"runnerId":"carl"},"outs":[],"scoreDeltaHalves":0,"batterId":"carl"}
+[40.0s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter joe
+[40.0s]   fielder kian: stamina 5.723 / stat 6
+[40.0s]   fielder ricy: stamina 7.134 / stat 8
+[40.0s]   fielder josh: stamina 7.000 / stat 7
+[40.0s] OK: some on-field fielder is below stat next play (cross-play drain persisted)
+[40.0s] OK: a NON-pitcher fielder drained (got: kian,ricy)
+[40.0s] benching the drained ricy (stamina 7.134) for robbie; they sit out play 2
+[40.1s] play 2: any resolved play (the benched fielder regains BENCH_STAMINA_REGEN at its end)
+[40.1s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter joe
+[41.4s] playOutcome→A: {"cause":{"kind":"caught","by":"kian"},"outs":["joe"],"scoreDeltaHalves":0,"batterId":"joe"}
+[41.4s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 1 | batting A | batter laurie
+[41.4s] bringing ricy back on for robbie
+[41.5s] OK: ricy regained bench stamina while sitting out: 8.000 = min(stat 8, 7.134 + 1)
+[41.5s] OK: ricy came back with MORE stamina than they left with
+[41.5s] OK: sub count incremented freely to 4 (casual cap is Infinity, never hit) — got 4
+[42.0s] ACCEPTANCE PASSED
