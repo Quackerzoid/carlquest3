@@ -118,7 +118,7 @@ function runMatch(net: Net): void {
     status.textContent = statusLine(net, net.room.state, lastPlay, localAction);
   };
   status.textContent = `connected — ${HELP}`;
-  attachInput(net, (text) => {
+  const { detach } = attachInput(net, (text) => {
     localAction = text;
     refresh();
   });
@@ -132,6 +132,7 @@ function runMatch(net: Net): void {
   });
   net.onOpponentLeft((side) => {
     status.textContent = `opponent left — match over (side ${side})`;
+    detach();
     void net.room.leave().catch(() => {
       // Room may already be closing/closed server-side; nothing more to do.
     });

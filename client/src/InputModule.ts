@@ -9,9 +9,23 @@ export interface InputState {
   spin: number;
 }
 
-export function attachInput(net: Net, onLocalAction: (text: string) => void): InputState {
+/** Return value of {@link attachInput}: the live input state plus a `detach` to remove its listener. */
+export interface AttachedInput {
+  state: InputState;
+  detach(): void;
+}
+
+/**
+ * Wires up keyboard controls for one match's `net` connection.
+ *
+ * Registers exactly one `window` keydown listener. The caller MUST call the returned
+ * `detach()` when the match ends (e.g. on `opponentLeft`, before returning to the lobby) —
+ * otherwise the listener stays live bound to the abandoned `net`/room and a stale handler
+ * from a previous match will keep firing (and erroring) on every subsequent keypress.
+ */
+export function attachInput(net: Net, onLocalAction: (text: string) => void): AttachedInput {
   const state: InputState = { spin: 0 };
-  window.addEventListener('keydown', (event) => {
+  const handleKeydown = (event: KeyboardEvent): void => {
     switch (event.code) {
       case 'KeyA':
         state.spin = -1;
@@ -63,6 +77,12 @@ export function attachInput(net: Net, onLocalAction: (text: string) => void): In
         break;
       default:
     }
-  });
-  return state;
+  };
+  window.addEventListener('keydown', handleKeydown);
+  return {
+    state,
+    detach: () => {
+      window.removeEventListener('keydown', handleKeydown);
+    },
+  };
 }
