@@ -253,6 +253,29 @@ describe('RulesModule — batting queue', () => {
   });
 });
 
+describe('setNextBatter (M8)', () => {
+  it('swaps a queued id in as the current batter, displaced batter to the queue front', () => {
+    const rules = createRulesModule({ squadA: squad('a1', 'a2', 'a3'), squadB: squad('b1', 'b2', 'b3') });
+    drive(rules);
+    expect(rules.readyForPlay()).toBe(true);
+    expect(rules.view().currentBatterId).toBe('a1');
+    expect(rules.view().queue).toEqual(['a2', 'a3']);
+    expect(rules.setNextBatter('a3')).toBe(true);
+    expect(rules.view().currentBatterId).toBe('a3');
+    expect(rules.view().queue).toEqual(['a1', 'a2']);
+  });
+
+  it('rejects ids not in the queue (unknown, current batter, other side)', () => {
+    const rules = createRulesModule({ squadA: squad('a1', 'a2', 'a3'), squadB: squad('b1', 'b2', 'b3') });
+    drive(rules);
+    expect(rules.readyForPlay()).toBe(true);
+    expect(rules.setNextBatter('a1')).toBe(false); // already up
+    expect(rules.setNextBatter('b1')).toBe(false); // other side
+    expect(rules.setNextBatter('nobody')).toBe(false);
+    expect(rules.view().currentBatterId).toBe('a1');
+  });
+});
+
 describe('RulesModule — innings end', () => {
   it('ends the innings when the batting side is all out (scores stay)', () => {
     const rules = createRulesModule({ squadA: squad('a1'), squadB: squad('b1'), inningsCount: 2 });

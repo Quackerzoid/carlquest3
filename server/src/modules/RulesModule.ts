@@ -47,6 +47,8 @@ export interface RulesView {
   tiebreak: boolean;
   /** null until GAME_OVER; 'draw' never persists (a tie triggers tiebreak instead). */
   winner: TeamSide | 'draw' | null;
+  /** Remaining batting queue, front first (excludes the current batter). */
+  queue: string[];
 }
 
 export function createRulesModule(cfg: RulesConfig): {
@@ -59,6 +61,7 @@ export function createRulesModule(cfg: RulesConfig): {
   rematch(): boolean;
   isFinalInnings(): boolean;
   pressure(runnersOnPosts: number): boolean;
+  setNextBatter(id: string): boolean;
 } {
   const inningsCount = cfg.inningsCount ?? CONST.GAME.INNINGS_COUNT;
   const totalSlots = inningsCount * SIDES; // A,B repeated inningsCount times
@@ -288,6 +291,22 @@ export function createRulesModule(cfg: RulesConfig): {
     return isFinalInnings() || runnersOnPosts >= PRESSURE_RUNNER_THRESHOLD;
   }
 
+  /**
+   * Batting side picks the next batter (spec §4, M8 — 'choose next batter only').
+   * Valid whenever a batter is up and `id` waits in the queue; the displaced
+   * current batter returns to the FRONT of the queue (their turn is deferred,
+   * not lost). Phase/role gating is the room's job.
+   */
+  function setNextBatter(id: string): boolean {
+    if (currentBatterId === null) return false;
+    const idx = queue.indexOf(id);
+    if (idx === -1) return false;
+    queue.splice(idx, 1);
+    queue.unshift(currentBatterId);
+    currentBatterId = id;
+    return true;
+  }
+
   function view(): RulesView {
     return {
       phase,
@@ -298,6 +317,7 @@ export function createRulesModule(cfg: RulesConfig): {
       currentBatterId,
       tiebreak,
       winner,
+      queue: [...queue],
     };
   }
 
@@ -314,5 +334,6 @@ export function createRulesModule(cfg: RulesConfig): {
     rematch,
     isFinalInnings,
     pressure,
+    setNextBatter,
   };
 }
