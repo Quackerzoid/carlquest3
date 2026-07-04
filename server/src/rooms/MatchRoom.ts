@@ -73,6 +73,13 @@ interface MatchRoomOptions {
    * is rejected in onCreate.
    */
   code?: string;
+  /**
+   * Test-only override of the mid-game reconnect grace window (seconds).
+   * Wire-reachable like `seed`/`rng` (joinOrCreate forwards creation options),
+   * so runtime-validated the same way; junk/absent falls back to
+   * CONST.GAME.RECONNECT_GRACE_S.
+   */
+  reconnectGraceS?: number;
 }
 
 function isFiniteNumber(n: unknown): n is number {
@@ -136,6 +143,8 @@ export class MatchRoom extends Room<MatchState> {
   /** Per-side confirmations for the current INITIAL_POSITIONING / PRE_PLAY gate. */
   private confirmed: Record<TeamSide, boolean> = { A: false, B: false };
   private ready: Record<TeamSide, boolean> = { A: false, B: false };
+  /** Mid-game reconnect grace window (seconds); test-only override, see MatchRoomOptions. */
+  private reconnectGraceS: number = CONST.GAME.RECONNECT_GRACE_S;
 
   /** Which seat a message came from; null = not seated (defensive — reject). */
   private sideOf(client: Client): TeamSide | null {
@@ -158,6 +167,10 @@ export class MatchRoom extends Room<MatchState> {
 
     this.setState(new MatchState());
     if (options.code !== undefined) this.state.roomCode = options.code;
+    this.reconnectGraceS =
+      isFiniteNumber(options.reconnectGraceS) && options.reconnectGraceS > 0
+        ? options.reconnectGraceS
+        : GAME.RECONNECT_GRACE_S;
     this.physics = await createPhysicsModule();
 
     // Mirror-roster demo squads (both sides = full table, batting order = table order).
@@ -209,17 +222,50 @@ export class MatchRoom extends Room<MatchState> {
     this.syncRulesView();
   }
 
-  override onLeave(client: Client): void {
+  override async onLeave(client: Client, consented?: boolean): Promise<void> {
     console.log(`client ${client.sessionId} left`);
-    // Pre-game leave frees the seat; mid-game disconnect handling lands in Task 3.
-    if (this.phase() !== 'LOBBY') return;
-    if (this.state.sessionA === client.sessionId) {
-      this.state.sessionA = '';
-      this.state.connectedA = false;
-    } else if (this.state.sessionB === client.sessionId) {
-      this.state.sessionB = '';
-      this.state.connectedB = false;
+    const side = this.sideOf(client);
+    if (side === null) return;
+    if (this.phase() === 'LOBBY') {
+      // Game not started: free the seat entirely (a different client may take it).
+      if (side === 'A') this.state.sessionA = '';
+      else this.state.sessionB = '';
+      this.setConnected(side, false);
+      return;
     }
+    this.setConnected(side, false);
+    if (consented === true) {
+      // Deliberate quit mid-game: no grace — tell the survivor and shut down.
+      // this.disconnect() is DELIBERATELY NOT awaited: Colyseus only finishes
+      // disposing once every concurrent onLeave call (including this one)
+      // returns (#_onLeaveConcurrent must reach 0 — see Room._disposeIfEmpty).
+      // Awaiting disconnect() from inside onLeave is a real deadlock: this
+      // handler would never return, so the counter never reaches 0, so
+      // disconnect()'s own promise (which waits on the "disconnect" event)
+      // never resolves either. Fire-and-forget, with the rejection logged.
+      this.broadcast('opponentLeft', { side });
+      this.disconnect().catch((err: unknown) => console.error('[MatchRoom] disconnect() after consented quit failed:', err));
+      return;
+    }
+    // Unexpected drop: freeze the game and hold the seat for the grace window.
+    this.state.paused = true;
+    try {
+      await this.allowReconnection(client, this.reconnectGraceS);
+      this.setConnected(side, true);
+      if (this.state.connectedA && this.state.connectedB) this.state.paused = false;
+    } catch {
+      // Grace expired or the room is already disposing (both players gone).
+      // Same not-awaited reasoning as the consented-quit branch above.
+      if (this.clients.length > 0) {
+        this.broadcast('opponentLeft', { side });
+        this.disconnect().catch((err: unknown) => console.error('[MatchRoom] disconnect() after reconnect-grace expiry failed:', err));
+      }
+    }
+  }
+
+  private setConnected(side: TeamSide, value: boolean): void {
+    if (side === 'A') this.state.connectedA = value;
+    else this.state.connectedB = value;
   }
 
   override onDispose(): void {
@@ -262,6 +308,10 @@ export class MatchRoom extends Room<MatchState> {
   // ---- Message handlers ------------------------------------------------------
 
   private handlePitch(client: Client, message: unknown): void {
+    if (this.state.paused) {
+      this.reject('pitch', 'paused');
+      return;
+    }
     if (this.phase() !== 'PLAY') {
       this.reject('pitch', `pitch only allowed in PLAY (phase ${this.phase()})`);
       return;
@@ -288,6 +338,10 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   private handleSwing(client: Client, message: unknown): void {
+    if (this.state.paused) {
+      this.reject('swing', 'paused');
+      return;
+    }
     if (this.phase() !== 'PLAY') {
       this.reject('swing', `swing only allowed in PLAY (phase ${this.phase()})`);
       return;
@@ -332,6 +386,10 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   private handleRunDecision(client: Client, message: unknown): void {
+    if (this.state.paused) {
+      this.reject('runDecision', 'paused');
+      return;
+    }
     if (this.phase() !== 'PLAY') {
       this.reject('runDecision', `runDecision only allowed in PLAY (phase ${this.phase()})`);
       return;
@@ -351,6 +409,10 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   private handleConfirmPositioning(client: Client): void {
+    if (this.state.paused) {
+      this.reject('confirmPositioning', 'paused');
+      return;
+    }
     const side = this.sideOf(client);
     if (side === null) {
       this.reject('confirmPositioning', 'wrongRole');
@@ -369,6 +431,10 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   private handleReadyForPlay(client: Client): void {
+    if (this.state.paused) {
+      this.reject('readyForPlay', 'paused');
+      return;
+    }
     const side = this.sideOf(client);
     if (side === null) {
       this.reject('readyForPlay', 'wrongRole');
@@ -387,6 +453,10 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   private handleRematch(client: Client): void {
+    if (this.state.paused) {
+      this.reject('rematch', 'paused');
+      return;
+    }
     if (this.sideOf(client) === null) {
       this.reject('rematch', 'wrongRole');
       return;
@@ -425,6 +495,7 @@ export class MatchRoom extends Room<MatchState> {
   // ---- Simulation tick -------------------------------------------------------
 
   private tick(deltaMs: number): void {
+    if (this.state.paused) return; // frozen: no sim time accrues, so play timeout/rest timers hold
     // Clamp to avoid a spiral-of-death catch-up burst after an event-loop stall.
     const dt = Math.min(deltaMs / 1000, PHYSICS.SIM_MAX_CATCHUP);
     this.simTime += dt;

@@ -90,4 +90,6 @@ export class MatchState extends Schema {
   @type('string') sessionB = '';
   @type('boolean') connectedA = false;
   @type('boolean') connectedB = false;
+  /** True while a mid-game disconnect grace runs — the simulation is frozen. */
+  @type('boolean') paused = false;
 }

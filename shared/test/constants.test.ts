@@ -167,6 +167,10 @@ describe('constants', () => {
     it('pins the maximum catchable ball height to 2.5 m', () => {
       expect(CONST.GAME.CATCH_HEIGHT_MAX).toBe(2.5);
     });
+
+    it('pins the reconnect grace window to 60 s', () => {
+      expect(CONST.GAME.RECONNECT_GRACE_S).toBe(60);
+    });
   });
 
   describe('FIELD — placeholder geometry (spec §8b)', () => {

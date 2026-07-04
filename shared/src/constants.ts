@@ -104,6 +104,8 @@ const GAME = {
   THROW_STAMINA_COST: 0.5,
   /** Balls above this height in metres are over everyone's head — no catch attempt (M4 design decision). */
   CATCH_HEIGHT_MAX: 2.5,
+  /** Seconds a mid-game disconnected player may reconnect before the room disposes. */
+  RECONNECT_GRACE_S: 60,
 } as const;
 
 function deepFreeze<T extends object>(obj: T): T {

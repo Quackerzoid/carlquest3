@@ -47,6 +47,15 @@ async function waitForPhase(room: TestRoom, phase: MatchPhase, maxTicks = 180): 
   throw new Error(`phase ${phase} not reached (stuck at ${room.state.phase})`);
 }
 
+/** Poll the room until `cond()` is true, or throw. */
+async function waitForCondition(room: TestRoom, cond: () => boolean, maxTicks = 300): Promise<void> {
+  for (let i = 0; i < maxTicks; i += 1) {
+    if (cond()) return;
+    await room.waitForNextSimulationTick();
+  }
+  throw new Error('condition not reached');
+}
+
 /** The client currently batting / fielding (side A bats first; innings switches flip it). */
 function battingClient(room: TestRoom, clientA: TestClient, clientB: TestClient): TestClient {
   return room.state.battingSide === 'A' ? clientA : clientB;
@@ -856,6 +865,53 @@ describe('MatchRoom', () => {
       const room = await colyseus.createRoom<MatchState>('match', {});
       await connectPair(room);
       await expect(colyseus.connectTo(room)).rejects.toThrow();
+    });
+  });
+
+  describe('M6 disconnect handling', () => {
+    it('an unconsented drop pauses the game (ball frozen) and a reconnect resumes it', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await startPlay(room, clientA, clientB);
+      fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
+      await waitNearPlane(room); // ball demonstrably in flight
+      const token = clientB.reconnectionToken;
+      await clientB.leave(false); // unconsented
+      await waitForCondition(room, () => room.state.paused);
+      const frozen = { x: room.state.ball.x, z: room.state.ball.z };
+      for (let i = 0; i < 30; i += 1) await room.waitForNextSimulationTick();
+      expect(room.state.ball.x).toBe(frozen.x);
+      expect(room.state.ball.z).toBe(frozen.z);
+      // Gameplay is rejected while paused.
+      clientA.send('swing', { timing: 0, aim: { x: 0.55, y: 0.47, z: 0.65 }, spinInput: 0 });
+      await room.waitForNextSimulationTick();
+      expect(JSON.parse(room.state.lastRejection).reason).toBe('paused');
+      const rejoined = await colyseus.sdk.reconnect(token);
+      await waitForCondition(room, () => !room.state.paused);
+      expect(room.state.connectedB).toBe(true);
+      await rejoined.leave();
+    });
+
+    it('a consented mid-game leave notifies the survivor and disposes the room', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await startPlay(room, clientA, clientB);
+      const left = new Promise<{ side: string }>((resolve) => {
+        clientA.onMessage('opponentLeft', (m: { side: string }) => resolve(m));
+      });
+      await clientB.leave(true); // deliberate quit
+      expect((await left).side).toBe('B');
+    });
+
+    it('grace expiry disposes the room (short test-only grace)', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS, reconnectGraceS: 1 });
+      const { clientA, clientB } = await connectPair(room);
+      await startPlay(room, clientA, clientB);
+      const left = new Promise<{ side: string }>((resolve) => {
+        clientA.onMessage('opponentLeft', (m: { side: string }) => resolve(m));
+      });
+      await clientB.leave(false);
+      expect((await left).side).toBe('B'); // fires when the 1 s grace lapses
     });
   });
 });
