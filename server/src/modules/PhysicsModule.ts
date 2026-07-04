@@ -31,7 +31,13 @@ export interface PhysicsModule {
   clearPostCrossings(): void;
   /** True iff the ball has contacted the ground since the last spawn/pitch/hit. */
   hasBounced(): boolean;
-  /** Upserts a fixed capsule obstacle; an existing id is repositioned, never duplicated. */
+  /**
+   * Upserts a fixed capsule obstacle; an existing id is repositioned, never
+   * duplicated. A flight that STARTS inside a blocker's capsule (the whale
+   * throwing the ball he holds at his hands) is exempt from that blocker until
+   * the ball first exits its footprint — never granted mid-flight, so a ball
+   * on final approach is still blocked (M9 final-review fix).
+   */
   setBlocker(id: string, position: Vec3, halfHeight: number, radius: number): void;
   /** Removes the blocker with this id; silent no-op for unknown ids. */
   clearBlocker(id: string): void;
@@ -109,10 +115,49 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
   // deliberately logical entities, never Rapier bodies (M4 design doc), so the
   // ball stays this world's ONLY dynamic body and placeBall's accumulator reset
   // remains safe — closing the M2 caveat recorded in CLAUDE.md §6.2.
-  const blockers = new Map<string, { body: RAPIER.RigidBody; colliderHandle: number }>();
+  interface BlockerEntry {
+    body: RAPIER.RigidBody;
+    collider: RAPIER.Collider;
+    halfHeight: number;
+    radius: number;
+  }
+  const blockers = new Map<string, BlockerEntry>();
   // Collider handles of all live blockers, for O(1) attribution when draining
   // contact events (WALL stop-dead, Milestone 9).
   const blockerColliderHandles = new Set<number>();
+  // Blockers the CURRENT flight is exempt from (M9 final-review fix): a flight
+  // released from INSIDE a blocker's capsule — the whale throwing the ball he
+  // holds, parked at his hands — must not pin against his own blocker. The
+  // exemption is granted ONLY at flight start (placeBall/applyHit evaluate
+  // containment) and revoked — the collider re-enabled — the moment the ball
+  // first exits the capsule footprint (checked per substep). A ball on final
+  // approach is therefore never let through: its flight started outside.
+  const exemptBlockerIds = new Set<string>();
+  // Numeric guard, not a tunable: hysteresis so re-arming happens strictly
+  // clear of the capsule surface rather than jittering on the boundary.
+  const EXEMPT_CLEARANCE = 0.05;
+
+  /** Ball centre strictly clear of the blocker capsule (segment distance, with hysteresis). */
+  function ballClearOfBlocker(entry: BlockerEntry): boolean {
+    const p = ballBody.translation();
+    const c = entry.body.translation();
+    const segY = Math.min(Math.max(p.y, c.y - entry.halfHeight), c.y + entry.halfHeight);
+    const dist = Math.hypot(p.x - c.x, p.y - segY, p.z - c.z);
+    return dist > entry.radius + PHYSICS.BALL_RADIUS + EXEMPT_CLEARANCE;
+  }
+
+  /**
+   * New flight: any blocker whose capsule currently contains the ball is
+   * disabled (exempt) for this flight; every other blocker is (re-)enabled.
+   */
+  function refreshFlightExemptions(): void {
+    for (const [id, entry] of blockers) {
+      const inside = !ballClearOfBlocker(entry);
+      entry.collider.setEnabled(!inside);
+      if (inside) exemptBlockerIds.add(id);
+      else exemptBlockerIds.delete(id);
+    }
+  }
 
   // Drained every substep; `true` = auto-clear drained events.
   const eventQueue = new RAPIER.EventQueue(true);
@@ -143,6 +188,7 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
     // revisit before other dynamic bodies join this world (Milestone 4), as resetting
     // it on a pitch would then shift simulation time for every body. See CLAUDE.md §6.2.
     accumulator = 0;
+    refreshFlightExemptions(); // a flight starting inside a blocker ignores it until first exit
   }
 
   function applyMagnus(): void {
@@ -195,6 +241,7 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
       // Hits always curve immediately: never leak a pitch's onset gate into
       // the following hit (spec/design decision, Task 2 brief).
       curveOnsetRemaining = 0;
+      refreshFlightExemptions(); // a hit is a fresh flight too (see placeBall)
     },
 
     step(dtSeconds: number): void {
@@ -242,6 +289,18 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
             ballBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
           }
         });
+        // Revoke flight exemptions the moment the ball is clear of the capsule
+        // footprint: the blocker re-arms for the rest of the flight (M9 whale
+        // own-throw fix — see the exemptBlockerIds declaration).
+        for (const id of exemptBlockerIds) {
+          const entry = blockers.get(id);
+          if (entry === undefined) {
+            exemptBlockerIds.delete(id);
+          } else if (ballClearOfBlocker(entry)) {
+            entry.collider.setEnabled(true);
+            exemptBlockerIds.delete(id);
+          }
+        }
         accumulator -= PHYSICS.FIXED_TIMESTEP;
       }
     },
@@ -297,13 +356,14 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
         body,
       );
       blockerColliderHandles.add(collider.handle);
-      blockers.set(id, { body, colliderHandle: collider.handle });
+      blockers.set(id, { body, collider, halfHeight, radius });
     },
 
     clearBlocker(id: string): void {
       const entry = blockers.get(id);
       if (entry === undefined) return;
-      blockerColliderHandles.delete(entry.colliderHandle);
+      blockerColliderHandles.delete(entry.collider.handle);
+      exemptBlockerIds.delete(id);
       world.removeRigidBody(entry.body); // attached colliders are removed with the body
       blockers.delete(id);
     },

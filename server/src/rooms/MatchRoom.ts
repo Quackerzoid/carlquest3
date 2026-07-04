@@ -5,6 +5,7 @@ import {
   createRng,
   getCharacter,
   hitAbilityMods,
+  NEUTRAL_PITCH_MODS,
   pitchAbilityMods,
   type Character,
   type DraftPickInput,
@@ -149,15 +150,17 @@ export class MatchRoom extends Room<MatchState> {
    * The delivering pitcher's ability mods, captured at each handlePitch (M9).
    * Neutral until the first pitch; a swing can only follow a pitch (ballLive
    * gate), so resolveSwing always sees the mods of the pitch it faces.
+   * (Reassigned wholesale, never mutated — the shared neutral is frozen.)
    */
-  private currentPitcherMods: PitchAbilityMods = {
-    pitchStatBonus: 0,
-    spinCurveMult: 1,
-    curveOnsetFraction: 0,
-    batterTimingWindowMult: 1,
-  };
+  private currentPitcherMods: PitchAbilityMods = NEUTRAL_PITCH_MODS;
   /** The delivered pitch's clamped spin input (spin-read penalty fact), captured at handlePitch (M9). */
   private lastPitchSpinInput = 0;
+  /**
+   * The delivering pitcher's spin stat, captured at handlePitch alongside the
+   * mods above (final-review minor): the swing must read the facts of the
+   * pitch it faces, not whoever is nominated pitcher at swing time.
+   */
+  private pitcherSpinStat = 0;
   private liveSince = 0;
   private restSince: number | null = null;
   /**
@@ -641,6 +644,7 @@ export class MatchRoom extends Room<MatchState> {
     const params = resolvePitch(pitcher.stats, { aim: m.aim, spinInput: m.spinInput }, mods);
     this.currentPitcherMods = mods;
     this.lastPitchSpinInput = Math.max(-1, Math.min(1, m.spinInput));
+    this.pitcherSpinStat = pitcher.stats.spin;
     this.physics.applyPitch(params);
     this.state.ballLive = true;
     this.contactMade = false;
@@ -691,7 +695,7 @@ export class MatchRoom extends Room<MatchState> {
       mods: hitAbilityMods(batter),
       isFinalInnings: this.rules.isFinalInnings(),
       timingWindowMult: this.currentPitcherMods.batterTimingWindowMult,
-      pitcherSpinStat: getCharacter(this.state.currentPitcherId).stats.spin,
+      pitcherSpinStat: this.pitcherSpinStat,
       pitchSpinInput: this.lastPitchSpinInput,
       pressure,
     });

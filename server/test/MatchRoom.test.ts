@@ -1312,6 +1312,68 @@ describe('MatchRoom', () => {
       expect(res.cause.kind).not.toBe('caught');
     }, 30000);
 
+    it('WALL: the whale can throw the ball he gathered — his own blocker never pins the release (final-review fix)', async () => {
+      // A held ball parks at the whale's hands, INSIDE his own armed blocker
+      // capsule; a fresh flight released there pins against it (the physics-
+      // level RED probe: 20 m/s → 1.8 m/s, stuck at ~0.4 m — see the
+      // PhysicsModule own-throw regression test). At room level the long hold
+      // keeps the ball↔capsule contact pair alive, so whether the release
+      // fired a fresh stop-dead event was contact-event JITTER pre-fix; this
+      // test pins the end-to-end contract — gather → hold → throw → the ball
+      // ESCAPES cleanly — which the flight-start exemption now guarantees.
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_CATCH });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+
+      // Custom draft: B takes the whale FIRST, then kian (still the default
+      // pitcher among B's five — same idiom as the stop-dead test above).
+      const picksA = ['carl', 'laurie', 'joel', 'jonty', 'joe'];
+      const picksB = ['whale', 'kian', 'josh', 'darcy', 'robbie'];
+      let a = 0;
+      let b = 0;
+      while (room.state.draftTurn !== '') {
+        const turn = room.state.draftTurn;
+        const id = (turn === 'A' ? picksA[a++] : picksB[b++]) ?? '';
+        const picker = turn === 'A' ? clientA : clientB;
+        const before = room.state.squadAIds.length + room.state.squadBIds.length;
+        picker.send('draftPick', { id });
+        await waitForCondition(room, () => room.state.squadAIds.length + room.state.squadBIds.length > before);
+      }
+      await waitForPhase(room, 'INITIAL_POSITIONING');
+
+      // Nominate the whale as PITCHER: pinned alone on the bowling square, so
+      // the drive-at-the-bowler corridor has no competing ALWAYS_CATCH fielder
+      // between the bat and him (kian returns to his slot-1 backstop layout
+      // spot, BEHIND the batter). The −2 aim (clamped to −10°) grounds the
+      // drive ~2.6 m out, so the whale's pickup is post-bounce: gathered on
+      // the first radius entry, never a play-ending caught-out.
+      clientB.send('setPitcher', { id: 'whale' });
+      await waitForCondition(room, () => room.state.currentPitcherId === 'whale');
+
+      await startPlay(room, clientA, clientB);
+      await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0, -2);
+
+      // Gather (hasBall flips true), then the delayed release (flips false).
+      // The batter-runner is mid-circuit throughout (~9 s vs the ~2 s gather),
+      // so a live target post exists and the whale's throw is released.
+      await waitForCondition(room, () => room.state.fielders.get('whale')?.hasBall === true, 600);
+      await waitForCondition(room, () => room.state.fielders.get('whale')?.hasBall === false, 600);
+
+      // The thrown ball must ESCAPE the whale: clear of him and still
+      // travelling. A pinned release would sit at his feet at ~zero speed
+      // until the play died at rest/timeout.
+      let escaped = false;
+      for (let i = 0; i < 90 && room.state.phase === 'PLAY' && !escaped; i += 1) {
+        await room.waitForNextSimulationTick();
+        const whale = room.state.fielders.get('whale');
+        if (whale === undefined || !room.state.ballLive) continue;
+        const d = Math.hypot(room.state.ball.x - whale.x, room.state.ball.z - whale.z);
+        const speed = Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
+        if (d > 3 && speed > 5) escaped = true;
+      }
+      expect(escaped).toBe(true);
+    }, 30000);
+
     it('CLUTCH_SWING: carl’s identical drive leaves the bat faster in the final innings than in innings 1', async () => {
       // exitVelocity(power 8, t) ≤ 34 m/s in innings 1; in the final innings
       // CLUTCH adds +3 (uncapped power 11 → 43·t) with pressureMult(nerve 8)

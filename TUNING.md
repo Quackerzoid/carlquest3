@@ -61,6 +61,16 @@ elsewhere.
 | `ABILITY.STATIONARY_SPEED_EPS` | `0.1` (m/s) | Speed below which a fielder counts as "stationary" for LONG_REACH's 1.4× catch-radius bonus. | Pure epsilon first guess — meant to distinguish "standing at their spot" from "chasing". If LONG_REACH fielders lose the bonus from tiny approach jitters, raise slightly; if they keep it while visibly drifting, lower. |
 | `ABILITY.WALL_BLOCKER_HALF_HEIGHT` / `WALL_BLOCKER_RADIUS` | `0.9` / `0.4` (m) | Size of the whale's WALL blocker capsule (total height 2.6 m with caps) — the volume that stops a struck ball dead. | Spec is silent on size; whale-sized first guess. Too large → the whale blanks an entire corridor of the field; too small → WALL rarely triggers. Judge against how often flat drives through the whale's zone die at his feet, and tune together with the field geometry/`LEGAL_ZONE`. |
 
+- **BUTTERFINGERS fumble dead-zone (M9 final-review observation).** A fumbled
+  ball parks dead at the fumbler's FEET, but the fumbler's catch-roll latch
+  stays set (deliberately — no instant re-roll on the parked ball), so the
+  fumbler himself can never recover it; with nobody else nearer, the play
+  simply ends at rest with the ball at his feet. Plausibly the intended
+  Butterfingers flavour (the drop costs the fielding side the ball outright),
+  noted here so it isn't rediscovered as a bug. If playtest wants recoverable
+  fumbles, clear the fumbler's latch a beat after the fumble or let a
+  teammate's arrival re-trigger the pickup.
+
 - **CLUTCH-test timing headroom (~0.37 ticks).** The CLUTCH unit tests use
   absolute swing-offset thresholds that sit only ~0.37 of a physics tick inside
   the window edge they assert against. Deterministic today (fixed timestep,

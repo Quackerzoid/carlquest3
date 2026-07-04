@@ -4,6 +4,7 @@
  */
 import {
   CONST,
+  NEUTRAL_PITCH_MODS,
   pitchSpeed,
   pitchSpin,
   type PitchAbilityMods,
@@ -43,14 +44,6 @@ function normaliseAim(aim: Vec3, maxElevationDeg: number): Vec3 {
   return { x: usable.x / length, y: cappedY / length, z: usable.z / length };
 }
 
-/** Neutral mods: identical output to the pre-M9 (no-ability) behaviour. */
-const NEUTRAL_MODS: PitchAbilityMods = {
-  pitchStatBonus: 0,
-  spinCurveMult: 1,
-  curveOnsetFraction: 0,
-  batterTimingWindowMult: 1,
-};
-
 /**
  * Estimated flight time (seconds) from the bowling square to the batting
  * square's z-plane, travelling along the normalised aim direction at the
@@ -70,7 +63,8 @@ function flightToPlaneSeconds(direction: Vec3, speed: number): number {
 export function resolvePitch(
   stats: StatBlock,
   input: PitchInput,
-  mods: PitchAbilityMods = NEUTRAL_MODS,
+  // Neutral default: identical output to the pre-M9 (no-ability) behaviour.
+  mods: PitchAbilityMods = NEUTRAL_PITCH_MODS,
 ): PitchParams {
   const direction = normaliseAim(input.aim, GAME.PITCH_ELEVATION_MAX_DEG);
   const speed = pitchSpeed(stats.pitch + mods.pitchStatBonus);

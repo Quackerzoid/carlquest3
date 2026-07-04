@@ -6,6 +6,7 @@ import {
   CONST,
   exitVelocity,
   hitSpin,
+  NEUTRAL_HIT_MODS,
   pressureMult,
   spinReadPenalty,
   timingFactor,
@@ -42,13 +43,6 @@ export interface SwingContext {
   /** RulesModule high-pressure flag (absorbs the old positional param). */
   pressure: boolean;
 }
-
-const NEUTRAL_HIT_MODS: HitAbilityMods = {
-  clutchPowerBonus: 0,
-  powerBaseBonus: 0,
-  powerBaseMaxError: 0,
-  spinReadImmune: false,
-};
 
 export const NEUTRAL_SWING_CONTEXT: SwingContext = {
   mods: NEUTRAL_HIT_MODS,

@@ -564,5 +564,27 @@ describe('PhysicsModule', () => {
       expect(rest.position.z).toBeLessThan(inPath.z);
       expect(Math.hypot(rest.velocity.x, rest.velocity.y, rest.velocity.z)).toBeLessThan(0.5);
     });
+
+    it('a flight released from INSIDE a blocker capsule escapes at throw speed, and the blocker re-arms once clear (M9 whale own-throw)', () => {
+      // The whale's own throw: a held ball parks at the holder's hands
+      // (y = 1.0), INSIDE his own armed WALL capsule, and applyThrow releases
+      // from that point. Pre-fix the release pinned against the capsule
+      // (~1.8 m/s, stuck at ~0.43 m) — the whale could never effect a run-out.
+      physics.setBlocker('whale', inPath, HALF_HEIGHT, RADIUS);
+      physics.applyPitch({
+        origin: { x: inPath.x, y: 1.0, z: inPath.z }, // the holder's hands, inside the capsule
+        velocity: { x: 0, y: 0, z: 20 },
+        angularVelocity: { x: 0, y: 0, z: 0 },
+      });
+      run(physics, 0.25); // ~5 m of flight at 20 m/s
+      const { position, velocity } = physics.getBallState();
+      expect(position.z - inPath.z).toBeGreaterThan(3); // well clear of the capsule
+      expect(Math.hypot(velocity.x, velocity.y, velocity.z)).toBeGreaterThan(15); // ≈ throw speed (damping only)
+
+      // The exemption is per flight and ends at first exit — NOT a naive
+      // proximity disarm: a NEW flight INTO the same capsule still stops dead.
+      roll();
+      expect(physics.getBallState().position.z).toBeLessThan(inPath.z);
+    });
   });
 });
