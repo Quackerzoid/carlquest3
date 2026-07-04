@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PlayOutcome, PlayResolution, SettlementFact, TeamSide } from '../src/types';
+import type { DraftPickInput, PlayOutcome, PlayResolution, SetPitcherInput, SettlementFact, TeamSide } from '../src/types';
 
 describe('M5 shared contracts (types)', () => {
   it('TeamSide accepts only A or B', () => {
@@ -41,5 +41,17 @@ describe('M5 shared contracts (types)', () => {
     // @ts-expect-error runnerId is required on the safe member
     const missing: PlayOutcome = { kind: 'safe', atPost: 0 };
     expect(missing).toBeDefined();
+  });
+
+  it('DraftPickInput shape compiles and round-trips JSON', () => {
+    const input: DraftPickInput = { id: 'carl' };
+    const roundTripped = JSON.parse(JSON.stringify(input)) as DraftPickInput;
+    expect(roundTripped).toEqual(input);
+  });
+
+  it('SetPitcherInput shape compiles and round-trips JSON', () => {
+    const input: SetPitcherInput = { id: 'kian' };
+    const roundTripped = JSON.parse(JSON.stringify(input)) as SetPitcherInput;
+    expect(roundTripped).toEqual(input);
   });
 });

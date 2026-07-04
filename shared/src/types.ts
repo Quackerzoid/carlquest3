@@ -107,6 +107,16 @@ export interface FielderSetup {
   position: { x: number; z: number };
 }
 
+/** §7 draftPick message: the character the current picker takes. */
+export interface DraftPickInput {
+  id: string;
+}
+
+/** §7 setPitcher message (pulled forward from M8): the fielding side's nominated bowler. */
+export interface SetPitcherInput {
+  id: string;
+}
+
 /** Which of the two teams (M5 rules engine; draft/innings assignment lands elsewhere). */
 export type TeamSide = 'A' | 'B';
 
