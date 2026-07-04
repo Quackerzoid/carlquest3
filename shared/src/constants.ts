@@ -61,6 +61,12 @@ const FIELD = {
     { x: 3, z: 28 },
     { x: -12, z: 24 },
   ],
+  /** Rectangular legal fielding area (spec §4); placeholder like the rest of the field geometry. */
+  LEGAL_ZONE: { minX: -20, maxX: 20, minZ: -6, maxZ: 32 },
+  /** Fielders must stay at least this far (m) from the batting square (spec §4). */
+  BATTING_SQUARE_KEEPOUT: 3,
+  /** The designated pitcher always stands here (spec §4); alias of the bowling square. */
+  PITCHING_SPOT: BOWLING_SQUARE,
 } as const;
 
 const GAME = {

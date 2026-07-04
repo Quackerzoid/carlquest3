@@ -216,6 +216,35 @@ describe('constants', () => {
         expect(Number.isFinite(pos.z)).toBe(true);
       }
     });
+
+    it('contains every fielding position within the legal zone', () => {
+      const { LEGAL_ZONE } = CONST.FIELD;
+      for (const pos of CONST.FIELD.FIELDING_POSITIONS) {
+        expect(pos.x).toBeGreaterThanOrEqual(LEGAL_ZONE.minX);
+        expect(pos.x).toBeLessThanOrEqual(LEGAL_ZONE.maxX);
+        expect(pos.z).toBeGreaterThanOrEqual(LEGAL_ZONE.minZ);
+        expect(pos.z).toBeLessThanOrEqual(LEGAL_ZONE.maxZ);
+      }
+    });
+
+    it('contains every post within the legal zone', () => {
+      const { LEGAL_ZONE } = CONST.FIELD;
+      for (const post of CONST.FIELD.POSTS) {
+        expect(post.x).toBeGreaterThanOrEqual(LEGAL_ZONE.minX);
+        expect(post.x).toBeLessThanOrEqual(LEGAL_ZONE.maxX);
+        expect(post.z).toBeGreaterThanOrEqual(LEGAL_ZONE.minZ);
+        expect(post.z).toBeLessThanOrEqual(LEGAL_ZONE.maxZ);
+      }
+    });
+
+    it('pins the batting-square keep-out radius to 3 m and requires it positive', () => {
+      expect(CONST.FIELD.BATTING_SQUARE_KEEPOUT).toBe(3);
+      expect(CONST.FIELD.BATTING_SQUARE_KEEPOUT).toBeGreaterThan(0);
+    });
+
+    it('pins the pitching spot to fielding slot 0 (the bowling square)', () => {
+      expect(CONST.FIELD.PITCHING_SPOT).toEqual(CONST.FIELD.FIELDING_POSITIONS[0]);
+    });
   });
 
   describe('MATCH_PHASES', () => {

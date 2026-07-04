@@ -143,3 +143,21 @@ export interface SettlementFact {
   home: boolean;
   out: boolean;
 }
+
+/** §7 reposition message: move an on-field fielder to (x, z), server-validated. */
+export interface RepositionInput {
+  id: string;
+  x: number;
+  z: number;
+}
+
+/** §7 substitute message: swap an on-field character for a benched one. */
+export interface SubstituteInput {
+  outId: string;
+  inId: string;
+}
+
+/** §7 setBatter message: the batting side's chosen next batter (must be in the queue). */
+export interface SetBatterInput {
+  id: string;
+}
