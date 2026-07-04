@@ -55,7 +55,7 @@ export function createDraftScreen(container: HTMLElement, net: Net): DraftScreen
 
     const stats = document.createElement('span');
     stats.className = 'draft-row-stats';
-    stats.textContent = statLine(character);
+    stats.textContent = `${statLine(character)}  [${character.ability.toLowerCase()}]`;
 
     const badge = document.createElement('span');
     badge.className = 'draft-row-badge';
@@ -74,8 +74,10 @@ export function createDraftScreen(container: HTMLElement, net: Net): DraftScreen
     if (!id) return;
     if (list.dataset['mode'] === 'draft') {
       net.sendDraftPick({ id });
+      target.disabled = true; // optimistic double-click guard; next state patch re-derives the real value
     } else if (list.dataset['mode'] === 'pitcher') {
       net.sendSetPitcher({ id });
+      target.disabled = true; // optimistic double-click guard; next state patch re-derives the real value
     }
   });
 
