@@ -13,6 +13,7 @@ import {
   pitchSpin,
   pressureMult,
   s01,
+  spinReadPenalty,
   timingFactor,
   timingWindow,
 } from '../src/index';
@@ -111,5 +112,13 @@ describe('formulas (spec §5, exact shapes)', () => {
   it('formulas are pure (repeat calls identical)', () => {
     expect(pitchSpeed(7)).toBe(pitchSpeed(7));
     expect(pCatch(6, 7, 0.2)).toBe(pCatch(6, 7, 0.2));
+  });
+
+  it('spinReadPenalty = 1 - SPIN_READ_W·s01(spinStat)·|spinInput|, clamped >= 0 (M9, SWITCH counterpart)', () => {
+    expect(spinReadPenalty(0, 1)).toBe(1); // s01(0) = 0 -> no penalty
+    expect(spinReadPenalty(10, 1)).toBeCloseTo(1 - CONST.ABILITY.SPIN_READ_W, 10);
+    expect(spinReadPenalty(10, 0)).toBe(1); // no spin input -> no penalty
+    expect(spinReadPenalty(10, -1)).toBeCloseTo(1 - CONST.ABILITY.SPIN_READ_W, 10); // |input|
+    expect(spinReadPenalty(10, 10)).toBeGreaterThanOrEqual(0); // never below 0
   });
 });

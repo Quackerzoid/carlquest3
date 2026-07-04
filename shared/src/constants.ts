@@ -114,6 +114,33 @@ const GAME = {
   RECONNECT_GRACE_S: 60,
 } as const;
 
+/**
+ * Ability tunables (spec §3, §9.9). All values are spec-literal except
+ * SPIN_READ_W, which is a USER-APPROVED invented formula weight — the
+ * spin-read penalty is SWITCH's counterpart mechanic and has no spec value.
+ */
+const ABILITY = {
+  CLUTCH_POWER_BONUS: 3,
+  CURVE_SPIN_MULT: 1.6,
+  /** Fraction of flight-to-plane time before Magnus curve activates (CURVEBALL_MASTER). */
+  CURVE_ONSET_FRACTION: 0.6,
+  LONG_REACH_RADIUS_MULT: 1.4,
+  /** m/s below which a fielder counts as "stationary" (LONG_REACH). */
+  STATIONARY_SPEED_EPS: 0.1,
+  QUICK_DRAW_DELAY_MULT: 0.5,
+  CANNON_PITCH_BONUS: 3,
+  CANNON_TIMING_WINDOW_MULT: 0.85,
+  POWER_BASE_BONUS: 2,
+  /** Max |timingError| in seconds for POWER_BASE's bonus to apply. */
+  POWER_BASE_MAX_ERROR: 0.1,
+  BUTTERFINGERS_FUMBLE_P: 0.35,
+  POWERHOUSE_RADIUS_BONUS_M: 0.5,
+  /** Stamina at/above which POWERHOUSE forces fatigueMult = 1. */
+  POWERHOUSE_FATIGUE_FLOOR: 2,
+  /** USER-APPROVED invented weight (M9 design doc §1): spin-read penalty = 1 - SPIN_READ_W·s01(spin)·|spinInput|. */
+  SPIN_READ_W: 0.25,
+} as const;
+
 function deepFreeze<T extends object>(obj: T): T {
   for (const value of Object.values(obj)) {
     if (typeof value === 'object' && value !== null) deepFreeze(value);
@@ -121,4 +148,4 @@ function deepFreeze<T extends object>(obj: T): T {
   return Object.freeze(obj);
 }
 
-export const CONST = deepFreeze({ PHYSICS, FIELD, GAME });
+export const CONST = deepFreeze({ PHYSICS, FIELD, GAME, ABILITY });

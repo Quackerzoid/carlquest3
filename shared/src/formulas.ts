@@ -75,3 +75,13 @@ export function fatigueMult(stamina: number): number {
 export function pressureMult(nerve: number): number {
   return 0.85 + 0.15 * s01(nerve);
 }
+
+/**
+ * Timing-window multiplier applied against spin (M9 design doc §1): a
+ * USER-APPROVED invented formula giving SWITCH a real counterpart mechanic —
+ * every batter's timing window shrinks against a spinning pitch unless
+ * immune. `1 − SPIN_READ_W · s01(spinStat) · |spinInput|`, clamped to >= 0.
+ */
+export function spinReadPenalty(spinStat: number, spinInput: number): number {
+  return Math.max(0, 1 - CONST.ABILITY.SPIN_READ_W * s01(spinStat) * Math.abs(spinInput));
+}

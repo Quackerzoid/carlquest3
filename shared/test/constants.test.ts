@@ -173,6 +173,64 @@ describe('constants', () => {
     });
   });
 
+  describe('ABILITY — spec §3, §9.9', () => {
+    it('pins the CLUTCH_SWING power bonus to 3', () => {
+      expect(CONST.ABILITY.CLUTCH_POWER_BONUS).toBe(3);
+    });
+
+    it('pins the CURVEBALL_MASTER spin multiplier to 1.6', () => {
+      expect(CONST.ABILITY.CURVE_SPIN_MULT).toBe(1.6);
+    });
+
+    it('pins the CURVEBALL_MASTER curve onset fraction to 0.6', () => {
+      expect(CONST.ABILITY.CURVE_ONSET_FRACTION).toBe(0.6);
+    });
+
+    it('pins the LONG_REACH radius multiplier to 1.4', () => {
+      expect(CONST.ABILITY.LONG_REACH_RADIUS_MULT).toBe(1.4);
+    });
+
+    it('pins the stationary speed epsilon to 0.1 m/s', () => {
+      expect(CONST.ABILITY.STATIONARY_SPEED_EPS).toBe(0.1);
+    });
+
+    it('pins the QUICK_DRAW release delay multiplier to 0.5', () => {
+      expect(CONST.ABILITY.QUICK_DRAW_DELAY_MULT).toBe(0.5);
+    });
+
+    it('pins the CANNON_ARM pitch bonus to 3', () => {
+      expect(CONST.ABILITY.CANNON_PITCH_BONUS).toBe(3);
+    });
+
+    it('pins the CANNON_ARM timing window multiplier to 0.85', () => {
+      expect(CONST.ABILITY.CANNON_TIMING_WINDOW_MULT).toBe(0.85);
+    });
+
+    it('pins the POWER_BASE power bonus to 2', () => {
+      expect(CONST.ABILITY.POWER_BASE_BONUS).toBe(2);
+    });
+
+    it('pins the POWER_BASE max timing error to 0.1 s', () => {
+      expect(CONST.ABILITY.POWER_BASE_MAX_ERROR).toBe(0.1);
+    });
+
+    it('pins the BUTTERFINGERS fumble probability to 0.35', () => {
+      expect(CONST.ABILITY.BUTTERFINGERS_FUMBLE_P).toBe(0.35);
+    });
+
+    it('pins the POWERHOUSE radius bonus to 0.5 m', () => {
+      expect(CONST.ABILITY.POWERHOUSE_RADIUS_BONUS_M).toBe(0.5);
+    });
+
+    it('pins the POWERHOUSE fatigue floor to 2', () => {
+      expect(CONST.ABILITY.POWERHOUSE_FATIGUE_FLOOR).toBe(2);
+    });
+
+    it('pins the spin-read penalty weight to 0.25', () => {
+      expect(CONST.ABILITY.SPIN_READ_W).toBe(0.25);
+    });
+  });
+
   describe('FIELD — placeholder geometry (spec §8b)', () => {
     it('defines exactly four posts', () => {
       expect(CONST.FIELD.POSTS).toHaveLength(4);

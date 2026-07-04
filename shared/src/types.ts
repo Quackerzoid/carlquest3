@@ -24,6 +24,8 @@ export interface PitchParams {
   origin?: Vec3;
   velocity: Vec3;
   angularVelocity: Vec3;
+  /** Seconds after release before Magnus curve activates (CURVEBALL_MASTER); 0/absent = immediate. */
+  curveOnsetS?: number;
 }
 
 /** Velocities a resolved swing imparts to the ball at its current position. */
