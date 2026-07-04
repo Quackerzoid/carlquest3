@@ -5,11 +5,163 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Carl Quest Sports</title>
     <style>
+      /* Scorer's-card identity (deliberate, project-wide — see docs/superpowers/specs
+         m10 design): parchment monospace ink on the dark field, hairline rules, sharp
+         corners, bracketed badges, ONE gold accent. No gradients, no shadows, no
+         border-radius, no animation — a card you write on, not a dashboard. */
       html, body { margin: 0; height: 100%; overflow: hidden; }
       #app { width: 100%; height: 100%; display: block; }
-      #status { position: fixed; top: 8px; left: 8px; margin: 0; color: #f5f1e6; font: 14px monospace; }
 
-      /* --- Lobby: a scorer's card clipped to the field, not a floating modal card. --- */
+      /* --- HUD: the in-match scorer's board + running log + key legend. --- */
+      #hud { font-family: monospace; color: #f5f1e6; }
+      #hud[hidden] { display: none; }
+
+      /* Left column: board with its running log directly beneath. */
+      #hud-left {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        width: 19em;
+        max-width: calc(100vw - 16px);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      #hud-board {
+        border: 1px solid #f5f1e6;
+        background: rgba(10, 12, 8, 0.72);
+        font-size: 13px;
+      }
+      #hud-board[hidden] { display: none; }
+      .board-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.6em;
+        padding: 0.45em 0.8em;
+        border-bottom: 1px solid #f5f1e6;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-size: 0.82em;
+      }
+      #board-you { color: #a9a494; }
+      #board-score {
+        padding: 0.35em 0.8em 0.15em;
+        font-size: 1.55em;
+        letter-spacing: 0.06em;
+      }
+      #board-badges { padding: 0 0.8em; min-height: 1.1em; letter-spacing: 0.08em; }
+      .board-badge { color: #f5c542; margin-right: 0.7em; }
+      #board-rows { padding: 0.3em 0.8em 0.6em; }
+      .board-row {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5em;
+        padding: 0.12em 0;
+      }
+      /* Dotted leader between label and value — the scorecard idiom. */
+      .board-label { order: 1; color: #a9a494; white-space: nowrap; }
+      .board-row::after { content: ''; order: 2; flex: 1; border-bottom: 1px dotted #3c4232; }
+      .board-value { order: 3; text-align: right; white-space: nowrap; }
+
+      /* --- Event feed: the scorer's running log, directly under the board. --- */
+      #hud-feed {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        font-size: 12px;
+      }
+      .feed-entry {
+        padding: 0.18em 0.2em;
+        color: #f5f1e6;
+      }
+      .feed-entry::before { content: '· '; color: #6b6656; }
+      /* Older entries recede like earlier lines on the card. */
+      .feed-entry:nth-child(2) { opacity: 0.85; }
+      .feed-entry:nth-child(3) { opacity: 0.7; }
+      .feed-entry:nth-child(4) { opacity: 0.55; }
+      .feed-entry:nth-child(5) { opacity: 0.4; }
+      .feed-entry:nth-child(6) { opacity: 0.3; }
+
+      /* --- Key legend: bottom-centre strip; only my live keys are inked. --- */
+      #hud-legend {
+        position: fixed;
+        bottom: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: calc(100vw - 16px);
+        padding: 0.4em 1em;
+        border: 1px solid #3c4232;
+        background: rgba(10, 12, 8, 0.72);
+        font-size: 12px;
+        white-space: nowrap;
+        overflow-x: auto;
+      }
+      #hud-legend:empty { display: none; }
+      .legend-item { color: #6b6656; margin-right: 1.1em; }
+      .legend-item:last-child { margin-right: 0; }
+      .legend-item.is-lit { color: #f5f1e6; }
+      .legend-item.is-lit .legend-key { color: #f5c542; }
+      .legend-hint { letter-spacing: 0.02em; }
+      .legend-notice {
+        color: #f5c542;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-size: 0.9em;
+      }
+
+      /* --- Result overlay: the closed scorecard, centred over the field. --- */
+      #hud-result {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(10, 12, 8, 0.55);
+      }
+      #hud-result[hidden] { display: none; }
+      #result-card {
+        width: 20em;
+        max-width: 90vw;
+        border: 1px solid #f5f1e6;
+        background: rgba(10, 12, 8, 0.72);
+        text-align: center;
+        padding: 1.1em 1.4em 1.3em;
+      }
+      #result-card .result-heading {
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        font-size: 0.85em;
+        color: #a9a494;
+        border-bottom: 1px solid #f5f1e6;
+        padding-bottom: 0.6em;
+        margin-bottom: 0.7em;
+      }
+      #result-score { font-size: 2em; letter-spacing: 0.06em; margin: 0.15em 0; }
+      #result-winner {
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: #f5c542;
+        margin: 0.3em 0 0.15em;
+      }
+      #result-line { color: #a9a494; font-size: 0.85em; margin-bottom: 1em; }
+      #result-actions { display: flex; gap: 0.7em; justify-content: center; }
+
+      /* Shared button idiom (lobby + result): inked outline, inverts on hover. */
+      .card-button {
+        font-family: monospace;
+        font-size: 0.85em;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #f5f1e6;
+        background: transparent;
+        border: 1px solid #f5f1e6;
+        padding: 0.5em 0.9em;
+        cursor: pointer;
+      }
+      .card-button:hover { background: #f5f1e6; color: #14170f; }
+      .card-button:disabled { opacity: 0.4; cursor: default; background: transparent; color: #f5f1e6; }
+
+      /* --- Lobby: the front of the scorer's card — title plate, two clear paths. --- */
       #lobby {
         position: fixed;
         inset: 0;
@@ -22,37 +174,52 @@
       }
       #lobby[hidden] { display: none; }
       #lobby-card {
-        width: 22em;
+        width: 24em;
         max-width: 90vw;
         border: 1px solid #f5f1e6;
-        padding: 1.25em 1.5em;
-        background: rgba(10, 12, 8, 0.35);
+        padding: 1.4em 1.6em 1.2em;
+        background: rgba(10, 12, 8, 0.72);
       }
-      #lobby-card h1 {
-        margin: 0 0 0.15em;
-        font-size: 1em;
+      #lobby-card .title {
+        margin: 0;
+        font-size: 1.5em;
         font-weight: normal;
-        letter-spacing: 0.18em;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        text-align: center;
+      }
+      #lobby-card .subtitle {
+        margin: 0.35em 0 0;
+        text-align: center;
+        color: #a9a494;
+        font-size: 0.78em;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
         border-bottom: 1px solid #f5f1e6;
-        padding-bottom: 0.6em;
+        padding-bottom: 0.9em;
       }
-      #lobby-card .rule { color: #a9a494; font-size: 0.8em; margin: 0.9em 0 0.4em; }
-      #lobby-actions { display: flex; flex-direction: column; gap: 0.9em; margin-top: 0.6em; }
-      .lobby-row { display: flex; gap: 0.5em; }
-      #lobby button {
-        font-family: monospace;
-        font-size: 0.85em;
-        letter-spacing: 0.08em;
+      .lobby-path { margin-top: 1.1em; }
+      .lobby-path .path-label {
+        color: #a9a494;
+        font-size: 0.78em;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
-        color: #f5f1e6;
-        background: transparent;
-        border: 1px solid #f5f1e6;
-        padding: 0.5em 0.8em;
-        cursor: pointer;
+        margin: 0 0 0.5em;
       }
-      #lobby button:hover { background: #f5f1e6; color: #14170f; }
-      #lobby button:disabled { opacity: 0.4; cursor: default; background: transparent; color: #f5f1e6; }
+      .lobby-divider {
+        display: flex;
+        align-items: center;
+        gap: 0.8em;
+        color: #6b6656;
+        font-size: 0.78em;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        margin-top: 1.1em;
+      }
+      .lobby-divider::before,
+      .lobby-divider::after { content: ''; flex: 1; border-bottom: 1px solid #3c4232; }
+      #lobby-create { width: 100%; }
+      .lobby-row { display: flex; gap: 0.5em; }
       #join-code {
         flex: 1;
         font-family: monospace;
@@ -67,17 +234,27 @@
         width: 5em;
       }
       #join-code::placeholder { color: #6b6656; letter-spacing: 0.35em; }
-      #lobby-waiting { display: none; text-align: center; }
+      #lobby-waiting { display: none; text-align: center; margin-top: 1.1em; }
+      #lobby-waiting .cue {
+        color: #a9a494;
+        font-size: 0.78em;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        margin: 0 0 0.2em;
+      }
       #lobby-waiting .code {
-        font-size: 2.2em;
+        font-size: 2.6em;
         letter-spacing: 0.4em;
-        margin: 0.3em 0 0.1em;
+        color: #f5c542;
+        margin: 0.15em 0 0.1em;
+        /* Optical centring: letter-spacing trails the last glyph. */
+        padding-left: 0.4em;
       }
       #lobby-waiting .hint { color: #a9a494; font-size: 0.8em; }
-      #lobby-error { color: #d98c6b; font-size: 0.8em; min-height: 1.2em; margin-top: 0.5em; }
+      #lobby-error { color: #d98c6b; font-size: 0.8em; min-height: 1.2em; margin: 0.9em 0 0; }
 
       /* --- Draft sheet: a scorer's roster ledger, pinned to one edge, never blocking
-         the status line or the field. Rows, not cards — this is a list you read down,
+         the board or the field. Rows, not cards — this is a list you read down,
          not a hand you fan out. --- */
       .draft-sheet {
         position: fixed;
@@ -123,6 +300,7 @@
       .draft-row:disabled { cursor: default; }
       .draft-row:not(:disabled):hover { background: rgba(245, 241, 230, 0.12); }
       .draft-row-name { letter-spacing: 0.04em; }
+      .draft-row-wide { grid-column: 1 / -1; }
       .draft-row-stats { color: #a9a494; font-size: 0.92em; }
       .draft-row-badge {
         text-align: right;
@@ -149,26 +327,55 @@
   </head>
   <body>
     <canvas id="app"></canvas>
-    <pre id="status">connecting…</pre>
     <div id="draft" hidden></div>
+
+    <div id="hud" hidden>
+      <div id="hud-left">
+        <section id="hud-board" hidden>
+          <div class="board-head"><span id="board-phase"></span><span id="board-you"></span></div>
+          <div id="board-score"></div>
+          <div id="board-badges"></div>
+          <div id="board-rows"></div>
+        </section>
+        <ol id="hud-feed"></ol>
+      </div>
+      <div id="hud-legend"></div>
+      <div id="hud-result" hidden>
+        <div id="result-card">
+          <div class="result-heading">Carl Quest Sports — final score</div>
+          <div id="result-score"></div>
+          <div id="result-winner"></div>
+          <div id="result-line"></div>
+          <div id="result-actions">
+            <button id="result-rematch" class="card-button" type="button">Rematch</button>
+            <button id="result-leave" class="card-button" type="button">Leave</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div id="lobby">
       <div id="lobby-card">
-        <h1>Carl Quest Sports — new match</h1>
+        <h1 class="title">Carl Quest Sports</h1>
+        <p class="subtitle">two-player rounders — the scorer's card</p>
 
         <div id="lobby-setup">
-          <p class="rule">start a match and share the code, or join one</p>
-          <div id="lobby-actions">
-            <button id="lobby-create" type="button">Create match</button>
+          <div class="lobby-path">
+            <p class="path-label">start a match</p>
+            <button id="lobby-create" class="card-button" type="button">Create match</button>
+          </div>
+          <div class="lobby-divider">or</div>
+          <div class="lobby-path">
+            <p class="path-label">join with a code</p>
             <div class="lobby-row">
               <input id="join-code" type="text" maxlength="4" placeholder="CODE" autocomplete="off" />
-              <button id="lobby-join" type="button">Join</button>
+              <button id="lobby-join" class="card-button" type="button">Join</button>
             </div>
           </div>
         </div>
 
         <div id="lobby-waiting">
-          <p class="rule">share this code with your opponent</p>
+          <p class="cue">share this code with your opponent</p>
           <div class="code" id="lobby-code">----</div>
           <p class="hint">waiting for opponent…</p>
         </div>

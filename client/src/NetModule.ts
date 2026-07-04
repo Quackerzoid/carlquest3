@@ -150,10 +150,16 @@ function wrapRoom(room: Room<MatchStateView>): Net {
     return null;
   };
 
-  room.onLeave(() => {
-    if (leaving) return;
+  // One drop can surface as onLeave, onError, or both — the callback must fire
+  // AT MOST ONCE per Net regardless (main.ts starts one reconnect attempt off it).
+  let disconnectFired = false;
+  const fireUnexpectedDisconnect = (): void => {
+    if (leaving || disconnectFired) return;
+    disconnectFired = true;
     unexpectedDisconnectCallback?.();
-  });
+  };
+  room.onLeave(fireUnexpectedDisconnect);
+  room.onError(fireUnexpectedDisconnect);
 
   const net: Net = {
     room,

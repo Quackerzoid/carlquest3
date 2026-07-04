@@ -1,13 +1,13 @@
-import { CHARACTERS, type PlayOutcome, type PlayResolution } from '@carlquest/shared';
 import { createScene } from './SceneModule';
-import { connect, type MatchStateView, type Net } from './NetModule';
+import { connect, type Net } from './NetModule';
 import { createBallView, createFieldersView, createRunnersView } from './RenderModule';
 import { attachInput } from './InputModule';
 import { createDraftScreen } from './DraftScreen';
 import { createPositioningControls, type SelectionStore } from './PositioningControls';
+import { createUI, describeResolution } from './UIModule';
 
 const canvasEl = document.querySelector<HTMLCanvasElement>('#app');
-const statusEl = document.querySelector<HTMLPreElement>('#status');
+const hudEl = document.querySelector<HTMLDivElement>('#hud');
 const draftEl = document.querySelector<HTMLDivElement>('#draft');
 const lobbyEl = document.querySelector<HTMLDivElement>('#lobby');
 const lobbySetupEl = document.querySelector<HTMLDivElement>('#lobby-setup');
@@ -19,7 +19,7 @@ const joinButtonEl = document.querySelector<HTMLButtonElement>('#lobby-join');
 const joinCodeInputEl = document.querySelector<HTMLInputElement>('#join-code');
 if (
   !canvasEl ||
-  !statusEl ||
+  !hudEl ||
   !draftEl ||
   !lobbyEl ||
   !lobbySetupEl ||
@@ -30,11 +30,10 @@ if (
   !joinButtonEl ||
   !joinCodeInputEl
 ) {
-  throw new Error('Missing lobby or #app/#status DOM elements');
+  throw new Error('Missing lobby or #app/#hud DOM elements');
 }
 // Rebind as non-null so nested functions below don't need re-narrowing.
 const canvas = canvasEl;
-const status = statusEl;
 const draft = draftEl;
 const lobby = lobbyEl;
 const lobbySetup = lobbySetupEl;
@@ -51,6 +50,8 @@ const fielders = createFieldersView(scene);
 const runners = createRunnersView(scene);
 start();
 
+const ui = createUI(hudEl);
+
 // Shared between PositioningControls (writer, on click) and DraftScreen (writer, on
 // bench click / reader, for the [selected] badge) — one selected fielder id at a time.
 // The store is the SINGLE source of truth for the 3D highlight: `set()` itself mirrors
@@ -66,70 +67,39 @@ const selection: SelectionStore = {
   },
 };
 
-const HELP =
-  'A/S/D spin · P pitch · Space swing · R run · T stop · Enter confirm/ready · N rematch ' +
-  '(keys only act for your own role)';
+/** The one live match's connection + teardown; null while in the lobby. */
+let active: { net: Net; teardown(): void } | null = null;
 
-function characterName(id: string): string {
-  // Tolerant lookup for the status line (unlike shared getCharacter, which throws).
-  return CHARACTERS.find((c) => c.id === id)?.name ?? '—';
+// Result-overlay buttons: wired ONCE (the UI is a singleton); they act on whichever
+// match is live when clicked.
+ui.onRematchClick(() => {
+  active?.net.sendRematch();
+});
+ui.onLeaveClick(() => {
+  if (!active) return;
+  const { net, teardown } = active;
+  net.markLeaving();
+  teardown();
+  void net.room.leave().catch(() => {
+    // Room may already be closing/closed server-side; nothing more to do.
+  });
+  showLobbySetup();
+});
+
+/** Plain-words feed line for a server rejection (exact map per the M10 plan). */
+function describeRejection(reason: string): string {
+  if (reason === 'wrongRole') return 'not your role';
+  if (reason === 'paused') return 'game is paused';
+  return reason;
 }
 
-function describeCause(cause: PlayOutcome): string {
-  switch (cause.kind) {
-    case 'caught':
-      return `caught by ${characterName(cause.by)}`;
-    case 'runOut':
-      return `${characterName(cause.runnerId)} run out at post ${String(cause.atPost)}`;
-    case 'safe':
-      return `${characterName(cause.runnerId)} safe at post ${String(cause.atPost)}`;
-    case 'rounder':
-      return 'rounder!';
-  }
-}
-
-function describeResolution(resolution: PlayResolution): string {
-  const parts = [describeCause(resolution.cause)];
-  if (resolution.scoreDeltaHalves > 0) parts.push(`+${String(resolution.scoreDeltaHalves)}½`);
-  if (resolution.outs.length > 0) parts.push(`out: ${resolution.outs.map(characterName).join(', ')}`);
-  return parts.join(' · ');
-}
-
-/** `phase | A x½ – B y½ | innings i | outs o | batter: name` + side/role + last play + help. */
-function statusLine(net: Net, state: MatchStateView, lastPlay: string, localAction: string): string {
-  const score = `A ${String(state.scoreHalvesA)}½ – B ${String(state.scoreHalvesB)}½`;
-  const winner = state.winner ? ` | winner: ${state.winner}` : '';
-  const tiebreak = state.tiebreak ? ' | TIEBREAK' : '';
-  const side = net.mySide();
-  const role = net.myRole();
-  const you = side ? ` | you are ${side}${role ? ` · ${role}` : ''}` : '';
-  const draftSegment =
-    state.phase === 'DRAFT'
-      ? ` | ${state.draftTurn === side ? 'your pick' : 'opponent picks'}`
-      : '';
-  const bowlerSegment =
-    state.phase === 'INITIAL_POSITIONING' || state.phase === 'PRE_PLAY' || state.phase === 'PLAY'
-      ? ` | bowler: ${characterName(state.currentPitcherId)}`
-      : '';
-  const positioning = state.phase === 'INITIAL_POSITIONING' || state.phase === 'PRE_PLAY';
-  const isFielding = side !== null && state.battingSide !== side;
-  const subsUsed = side === 'A' ? state.subsUsedA : state.subsUsedB;
-  const subsSegment = positioning && isFielding ? ` | subs used: ${String(subsUsed ?? 0)}` : '';
-  const head =
-    `${state.phase} | ${score} | innings ${String(state.inningsIndex + 1)} | ` +
-    `outs ${String(state.outs)} | batter: ${characterName(state.currentBatterId)}` +
-    `${tiebreak}${winner}${you}${draftSegment}${bowlerSegment}${subsSegment}`;
-  const paused = state.paused === true ? 'opponent disconnected — waiting for reconnect' : '';
-  const tail = [paused, lastPlay && `last: ${lastPlay}`, localAction, HELP].filter(Boolean).join(' — ');
-  return `${head}\n${tail}`;
-}
-
-function showLobbySetup(): void {
+function showLobbySetup(notice = ''): void {
   lobby.hidden = false;
   lobbySetup.style.display = '';
   lobbyWaiting.style.display = 'none';
   createButton.disabled = false;
   joinButton.disabled = false;
+  lobbyError.textContent = notice;
 }
 
 function showLobbyWaiting(code: string): void {
@@ -143,22 +113,19 @@ function hideLobby(): void {
 }
 
 function runMatch(net: Net): void {
-  let lastPlay = '';
-  let localAction = '';
   // Tracks the fielding/batting flip across innings so a leftover positioning
   // selection from the old fielding side doesn't survive into the next one.
   let lastBattingSide: string | null = null;
+  // Feed-event edge detection (opponent joined, rematch started, paused/resumed).
+  let lastPhase: string | null = null;
+  let lastPaused = false;
   // Per-net, like attachInput: holds the net closure. createDraftScreen empties
   // its container on creation, so re-entry after opponentLeft is clean.
   selection.set(null);
   const draftScreen = createDraftScreen(draft, net, selection);
-  const refresh = () => {
-    status.textContent = statusLine(net, net.room.state, lastPlay, localAction);
-  };
-  status.textContent = `connected — ${HELP}`;
-  const { detach } = attachInput(net, (text) => {
-    localAction = text;
-    refresh();
+  const { detach } = attachInput(net, () => {
+    // Local key echoes retired with the status line — the feed carries authoritative
+    // events only (play resolutions, rejections, connection changes).
   });
   const positioningControls = createPositioningControls(
     canvas,
@@ -166,35 +133,72 @@ function runMatch(net: Net): void {
     fielders,
     net,
     selection,
-    (text) => {
-      const selectedId = selection.get();
-      localAction = selectedId ? `moving ${characterName(selectedId)} — click the field` : text;
-      refresh();
+    () => {
+      // As above: selection feedback lives in the 3D highlight + panel badge now.
     },
   );
-  net.onPlayOutcome((resolution) => {
-    lastPlay = describeResolution(resolution);
-    refresh();
-  });
-  net.onRejected((rejection) => {
-    localAction = `rejected ${rejection.message} (${rejection.phase}): ${rejection.reason}`;
-    refresh();
-  });
-  net.onOpponentLeft((side) => {
-    status.textContent = `opponent left — match over (side ${side})`;
+
+  // Single teardown for EVERY way a match ends (opponent left, leave button,
+  // reconnect success/failure): detach listeners, clear selection, reset the HUD.
+  let torn = false;
+  const teardown = (): void => {
+    if (torn) return;
+    torn = true;
     detach();
     positioningControls.detach();
     selection.set(null);
+    ui.reset();
+    if (active?.net === net) active = null;
+  };
+  active = { net, teardown };
+
+  net.onPlayOutcome((resolution) => {
+    if (torn) return;
+    ui.pushEvent(describeResolution(resolution));
+    for (const id of resolution.outs) runners.markOut(id);
+  });
+  net.onRejected((rejection) => {
+    if (torn) return;
+    ui.pushEvent(describeRejection(rejection.reason));
+  });
+  net.onOpponentLeft((side) => {
+    net.markLeaving();
+    teardown();
     void net.room.leave().catch(() => {
       // Room may already be closing/closed server-side; nothing more to do.
     });
-    showLobbySetup();
+    showLobbySetup(`opponent left — match over (side ${side})`);
+  });
+  net.onUnexpectedDisconnect(() => {
+    void (async () => {
+      ui.pushEvent('connection lost — reconnecting…');
+      ui.setNotice('reconnecting…');
+      const fresh = await net.tryReconnect();
+      teardown();
+      if (fresh) {
+        runMatch(fresh);
+        ui.pushEvent('reconnected');
+      } else {
+        showLobbySetup('connection lost');
+      }
+    })();
   });
   net.room.onStateChange((state) => {
+    if (torn) return; // a straggler patch after teardown must not resurrect the HUD
     if (state.battingSide !== lastBattingSide) {
       lastBattingSide = state.battingSide;
       selection.set(null);
     }
+    if (lastPhase === 'LOBBY' && state.phase !== 'LOBBY') ui.pushEvent('opponent joined');
+    if (lastPhase === 'GAME_OVER' && state.phase !== 'GAME_OVER' && state.phase !== 'LOBBY') {
+      // Rematch: the feed is per-match — clear it, then note the restart.
+      ui.reset();
+      ui.pushEvent('rematch started');
+    }
+    if (state.paused && !lastPaused) ui.pushEvent('game paused — opponent disconnected');
+    if (!state.paused && lastPaused) ui.pushEvent('game resumed');
+    lastPhase = state.phase;
+    lastPaused = state.paused;
     ball.update(state.ball.x, state.ball.y, state.ball.z, state.ballLive);
     fielders.update(state.fielders.values());
     runners.update(state.runners.values());
@@ -206,7 +210,7 @@ function runMatch(net: Net): void {
       hideLobby();
     }
     draftScreen.update(state, net.mySide());
-    refresh();
+    ui.update(state, net);
   });
 }
 
@@ -258,4 +262,3 @@ joinCodeInput.addEventListener('keydown', (event) => {
 });
 
 showLobbySetup();
-status.textContent = `${HELP}`;

@@ -202,6 +202,8 @@ interface RunnerTarget {
   out: boolean;
   /** performance.now() timestamp after which a dying (out) runner's mesh may be removed, even if unseen in the latest update(). */
   dyingUntil: number | null;
+  /** True once a dying runner has been absent from at least one patch — a later reappearance is a genuine revival (new play/rematch), not the pre-delete straggler patch. */
+  absentWhileDying: boolean;
 }
 
 /** Capsule per runner, keyed by character id; meshes are added/removed as runners spawn and settle (M5 multi-runner). Out runners topple, tint red, and are retained briefly before removal (markOut). */
@@ -228,6 +230,7 @@ export function createRunnersView(scene: THREE.Scene): RunnersView {
 
   return {
     update(runners) {
+      const now = performance.now();
       const seen = new Set<string>();
       for (const runner of runners) {
         seen.add(runner.id);
@@ -240,8 +243,19 @@ export function createRunnersView(scene: THREE.Scene): RunnersView {
         }
         let t = targets.get(runner.id);
         if (!t) {
-          t = { position: new THREE.Vector3(), out: false, dyingUntil: null };
+          t = { position: new THREE.Vector3(), out: false, dyingUntil: null, absentWhileDying: false };
           targets.set(runner.id, t);
+        }
+        // Revive a dying runner whose retention has expired, or whose id has come
+        // BACK to the schema after being deleted (new play / rematch re-uses the id):
+        // clear the topple/tint so the revived id renders live again. A straggler
+        // patch that still lists the runner before its delete lands does NOT revive
+        // (dyingUntil unexpired and never absent).
+        if (t.dyingUntil !== null && (t.absentWhileDying || now >= t.dyingUntil)) {
+          t.dyingUntil = null;
+          t.absentWhileDying = false;
+          mesh.material = material;
+          mesh.rotation.z = 0;
         }
         // A dying (toppled) runner keeps its frozen position/rotation regardless of
         // fresh schema data until its retain window expires — markOut owns the visual
@@ -252,14 +266,16 @@ export function createRunnersView(scene: THREE.Scene): RunnersView {
           mesh.visible = !runner.out;
         }
       }
-      const now = performance.now();
       for (const [id, mesh] of meshes) {
         const t = targets.get(id);
         const dying = t?.dyingUntil ?? null;
         if (seen.has(id)) continue;
         // Not present in this patch (schema entry deleted). Remove immediately unless
         // still within its dying retain window.
-        if (dying !== null && now < dying) continue;
+        if (dying !== null && now < dying) {
+          if (t) t.absentWhileDying = true;
+          continue;
+        }
         scene.remove(mesh);
         mesh.geometry.dispose();
         meshes.delete(id);
@@ -269,11 +285,18 @@ export function createRunnersView(scene: THREE.Scene): RunnersView {
     markOut(id) {
       const mesh = meshes.get(id);
       const t = targets.get(id);
-      if (!mesh || !t) return;
+      if (!mesh || !t) {
+        // Dev aid only: the schema delete can legitimately beat the playOutcome
+        // broadcast, in which case the mesh is already gone and there is nothing
+        // to topple — but log it so a systematic ordering change is noticed.
+        console.warn(`RunnersView.markOut('${id}'): no live mesh — topple skipped`);
+        return;
+      }
       mesh.material = outMat;
       mesh.visible = true;
       mesh.rotation.z = RUNNER_TOPPLE_Z;
       t.dyingUntil = performance.now() + RUNNER_OUT_RETAIN_MS;
+      t.absentWhileDying = false;
     },
     dispose() {
       raf.cancel();

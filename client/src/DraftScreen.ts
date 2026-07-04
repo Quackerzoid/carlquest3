@@ -66,6 +66,19 @@ function buildSectionLabel(text: string): HTMLDivElement {
   return label;
 }
 
+/** Non-clickable full-width informational row (now batting / parked runners). */
+function buildInfoRow(text: string): HTMLButtonElement {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'draft-row';
+  row.disabled = true;
+  const span = document.createElement('span');
+  span.className = 'draft-row-name draft-row-wide';
+  span.textContent = text;
+  row.append(span);
+  return row;
+}
+
 /**
  * Renders (a) the DRAFT-phase pick grid — one row per roster character, clickable
  * on your turn, greyed + side-badged once picked, leftover stays greyed unbadged —
@@ -193,15 +206,9 @@ export function createDraftScreen(
 
         list.appendChild(buildSectionLabel('bench'));
         if (bench.length === 0) {
-          const empty = document.createElement('button');
-          empty.type = 'button';
-          empty.className = 'draft-row';
-          empty.disabled = true;
-          const name = document.createElement('span');
-          name.className = 'draft-row-name';
-          name.textContent = 'bench — awaiting roster growth';
-          empty.append(name);
-          list.appendChild(empty);
+          // Full-width so the note reads as one line, not a word-per-line wrap in the
+          // 5.5em name column (exact text is frozen — the M8 acceptance asserts it).
+          list.appendChild(buildInfoRow('bench — awaiting roster growth'));
         } else {
           for (const id of bench) {
             const row = buildRow(id, statLineForId(id));
@@ -218,21 +225,29 @@ export function createDraftScreen(
       heading.textContent = 'next batter';
       list.innerHTML = '';
 
-      // Current batter is NOT in queueIds (spec: queue excludes them) — render as a
-      // separate disabled header row above the queue rather than dead-code-checking
-      // for it inside the queue loop.
+      // Current batter is NOT in queueIds (spec: queue excludes them) — render as an
+      // informational header row above the queue (M10: `now batting: Name`).
       if (state.currentBatterId) {
-        const current = buildRow(state.currentBatterId, statLineForId(state.currentBatterId));
-        const badge = current.querySelector<HTMLSpanElement>('.draft-row-badge');
-        current.disabled = true;
-        current.classList.add('is-taken');
-        if (badge) badge.textContent = '[batting]';
-        list.appendChild(current);
+        list.appendChild(buildInfoRow(`now batting: ${characterName(state.currentBatterId)}`));
       }
 
       for (const id of queue) {
         const row = buildRow(id, statLineForId(id));
         list.appendChild(row);
+      }
+
+      // Parked runners (M10, informational): survivors standing at a post between
+      // plays — atPost ≥ 1, not out, not mid-run. The queue cannot summon them.
+      const parked = [...state.runners.values()].filter(
+        (runner) => runner.atPost >= 1 && !runner.out && !runner.running,
+      );
+      if (parked.length > 0) {
+        list.appendChild(buildSectionLabel('parked'));
+        for (const runner of parked) {
+          list.appendChild(
+            buildInfoRow(`parked: ${characterName(runner.id)} @ post ${String(runner.atPost)}`),
+          );
+        }
       }
     },
   };
