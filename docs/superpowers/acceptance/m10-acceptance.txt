@@ -1,0 +1,69 @@
+[3.4s] OK: lobby title plate renders
+[3.9s] OK: share-this-code cue renders (got 'share this code with your opponent')
+[3.9s] OK: 4-letter room code displayed (got 'QUNN')
+[4.8s] page 1 reached DRAFT with the pick sheet + HUD visible
+[5.1s] page 2 reached DRAFT with the pick sheet + HUD visible
+[9.5s] OK: table-order draft clicked through the UI (carl,kian,laurie,josh,joel,darcy,jonty,robbie,joe,ricy)
+[9.6s] page 1 board shows phase 'initial positioning'
+[9.6s] page 2 board shows phase 'initial positioning'
+[9.8s] red-pixel baseline (pre-game): 0
+[10.7s] OK: batting page legend lights exactly [Space] swing + [R] run + [T] stop (got: [Space] swing | [R] run | [T] stop)
+[10.7s] OK: fielding page legend lights exactly [A/S/D] spin + [P] pitch (got: [A/S/D] spin | [P] pitch)
+[10.7s] OK: both boards show phase play
+[17.1s] play 1 (A batting): Carl safe at post 3 · +1½ — board A 1½ – B 0½ on both pages
+[23.9s] play 2 (A batting): Laurie safe at post 2 · +1½ — board A 2½ – B 0½ on both pages
+[25.3s] out-runner topple attempt: NOT CAPTURED on any out-carrying play (last attempt: 0 red px vs baseline 0 after 'caught by Josh · out: Joel'; markOut warns so far p1=1 p2=1)
+[25.4s] play 3 (A batting): caught by Josh · out: Joel — board A 2½ – B 0½ on both pages
+[32.2s] play 4 (A batting): Jonty safe at post 2 · +1½ — board A 3½ – B 0½ on both pages
+[33.5s] out-runner topple attempt: NOT CAPTURED on any out-carrying play (last attempt: 0 red px vs baseline 0 after 'caught by Josh · out: Joe'; markOut warns so far p1=2 p2=2)
+[33.6s] play 5 (A batting): caught by Josh · out: Joe — board A 3½ – B 0½ on both pages
+[43.2s] play 6: no resolution (swing likely missed → silent re-pitch state) — attempt 2
+[44.0s] out-runner topple attempt: NOT CAPTURED on any out-carrying play (last attempt: 0 red px vs baseline 0 after 'caught by Laurie · out: Kian'; markOut warns so far p1=3 p2=3)
+[44.1s] play 6 (B batting): caught by Laurie · out: Kian — board A 3½ – B 0½ on both pages
+[45.4s] out-runner topple attempt: NOT CAPTURED on any out-carrying play (last attempt: 0 red px vs baseline 0 after 'caught by Laurie · out: Josh'; markOut warns so far p1=4 p2=4)
+[45.5s] play 7 (B batting): caught by Laurie · out: Josh — board A 3½ – B 0½ on both pages
+[49.0s] out-runner topple attempt: VERIFIED: red toppled capsule visible after 'Darcy run out at post 2 · out: Darcy' (536 red px vs baseline 0)
+[49.1s] play 8 (B batting): Darcy run out at post 2 · out: Darcy — board A 3½ – B 0½ on both pages
+[58.7s] play 9: no resolution (swing likely missed → silent re-pitch state) — attempt 2
+[61.0s] play 9 (B batting): caught by Jonty · out: Robbie — board A 3½ – B 0½ on both pages
+[67.8s] play 10 (B batting): Ricy safe at post 3 · +1½ — board A 3½ – B 1½ on both pages
+[69.0s] play 11 (A batting): caught by Josh · out: Carl — board A 3½ – B 1½ on both pages
+[75.8s] play 12 (A batting): Laurie safe at post 2 · +1½ — board A 4½ – B 1½ on both pages
+[82.6s] play 13 (A batting): Joel safe at post 2 · +1½ — board A 5½ – B 1½ on both pages
+[85.4s] play 14 (A batting): caught by Robbie · out: Jonty — board A 5½ – B 1½ on both pages
+[92.1s] play 15 (A batting): Joe safe at post 1 — board A 5½ – B 1½ on both pages
+[93.3s] play 16 (B batting): caught by Laurie · out: Kian — board A 5½ – B 1½ on both pages
+[94.5s] play 17 (B batting): caught by Laurie · out: Josh — board A 5½ – B 1½ on both pages
+[95.8s] play 18 (B batting): caught by Laurie · out: Darcy — board A 5½ – B 1½ on both pages
+[98.5s] play 19 (B batting): caught by Jonty · out: Robbie — board A 5½ – B 1½ on both pages
+[99.7s] play 20 (B batting): caught by Laurie · out: Ricy — board A 5½ – B 1½ on both pages
+[99.7s] OK: at least one play resolved via real keydowns (20 plays driven)
+[99.7s] GAME_OVER after 20 plays — accumulated A 5½ – B 1½
+[99.8s] page 1 result overlay visible
+[99.8s] page 2 result overlay visible
+[99.9s] OK: result score matches the accumulated total (got 'A 5½ – B 1½')
+[99.9s] OK: result names the higher side (got 'WINNER: A', scores A 5 B 1)
+[99.9s] OK: result innings line renders (got 'after 4 innings')
+[100.0s] OK: GAME_OVER legend lights exactly [N] rematch (got: [N] rematch)
+[100.6s] OK: page 1 feed shows 'rematch started' after REMATCH click (got: rematch started)
+[100.6s] page 1 rematch: score zeroed, overlay gone
+[100.7s] OK: page 2 feed shows 'rematch started' after REMATCH click (got: rematch started)
+[100.7s] page 2 rematch: score zeroed, overlay gone
+[100.8s] rematch game rests in initial positioning
+[101.1s] OK: page 2 game socket force-closed (unconsented drop; 1 socket(s))
+[101.2s] page 2 feed: 'connection lost — reconnecting…'
+[101.2s] page 1 feed: 'game paused — opponent disconnected' (opponent's HUD shows the pause)
+[102.9s] page 2 feed: 'reconnected' (the one-attempt auto-reconnect succeeded)
+[102.9s] page 1 feed: 'game resumed'
+[102.9s] page 1 paused legend notice caught mid-window: YES
+[102.9s] OK: page 1 legend paused notice cleared (unpaused)
+[103.1s] page 1 board advanced to 'pre play' after reconnect — HUD live
+[103.1s] page 2 board advanced to 'pre play' after reconnect — HUD live
+[108.7s] setOffline probe: context.setOffline(true) did NOT affect the established game WebSocket in this Chromium (known CDP network-emulation limitation) — hence the drill above forces the drop via a raw socket close instead
+[108.7s] out-runner topple (best-effort): VERIFIED: red toppled capsule visible after 'Darcy run out at post 2 · out: Darcy' (536 red px vs baseline 0)
+[108.7s] page 1 markOut console.warn count: 9 (no spam — at most one per out-carrying play)
+[108.7s] OK: page 1 logged no page/console errors ()
+[108.7s] page 2 markOut console.warn count: 9 (no spam — at most one per out-carrying play)
+[108.7s] OK: page 2 logged no page/console errors ()
+[108.7s] M10 BROWSER ACCEPTANCE PASSED — 20 plays, winner A, reconnect drill clean
+EXIT=0
