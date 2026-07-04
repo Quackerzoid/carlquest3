@@ -516,11 +516,53 @@ describe('PhysicsModule', () => {
         velocity: { x: 0, y: 0, z: 15 },
         angularVelocity: { x: 0, y: 0, z: 0 },
       });
-      run(physics, 0.3); // strikes the capsule at ~0.24 s, rebounds while still airborne
+      run(physics, 0.3); // strikes the capsule at ~0.24 s, stops dead while still airborne
       const { position, velocity } = physics.getBallState();
-      expect(velocity.z).toBeLessThan(0); // rebounded off the capsule
+      expect(Math.hypot(velocity.x, velocity.z)).toBeLessThan(0.5); // stopped dead (M9 WALL), not rebounded
       expect(position.y).toBeGreaterThan(CONST.PHYSICS.BALL_RADIUS * 2); // never touched the ground
       expect(physics.hasBounced()).toBe(false);
+    });
+
+    it('a ball stops dead on blocker contact: speed collapses at the capsule with no bounce-off (M9 WALL)', () => {
+      // Same roll as the passes-unimpeded case above; with the blocker in the
+      // path, velocity (linear AND angular) must be zeroed within a couple of
+      // substeps of reaching the front face (z ~ 3.66), and the ball must then
+      // stay by the capsule — gravity may drop it, but it never rebounds away.
+      physics.setBlocker('whale', inPath, HALF_HEIGHT, RADIUS);
+      physics.spawnBall({ x: 0, y: CONST.PHYSICS.BALL_RADIUS, z: 0 });
+      physics.applyHit({ velocity: { x: 0, y: 0, z: 10 }, angularVelocity: { x: 0, y: 20, z: 0 } });
+
+      // Roll up to just short of the capsule's front face.
+      let guard = 0;
+      while (physics.getBallState().position.z < 3.5 && guard < 300) {
+        physics.step(DT);
+        guard += 1;
+      }
+      expect(guard).toBeLessThan(300);
+      const approach = physics.getBallState();
+      expect(approach.velocity.z).toBeGreaterThan(5); // still travelling when it arrives
+
+      // At ~10 m/s the remaining ~0.16 m is inside the next substep; a couple
+      // more and the contact must have killed all motion.
+      physics.step(DT);
+      physics.step(DT);
+      physics.step(DT);
+      const stopped = physics.getBallState();
+      expect(Math.hypot(stopped.velocity.x, stopped.velocity.y, stopped.velocity.z)).toBeLessThan(0.5);
+      // The 20 rad/s launch spin barely decays in free flight (angular damping
+      // 0.02), so anything well under it proves the contact zeroed it. It is
+      // NOT asserted near zero: a grounded ball re-acquires rolling spin from
+      // its residual sub-0.5 m/s creep via ground friction (ω = v/r).
+      expect(
+        Math.hypot(stopped.angularVelocity.x, stopped.angularVelocity.y, stopped.angularVelocity.z),
+      ).toBeLessThan(10);
+
+      // No bounce-off: half a second later the ball still rests at the capsule.
+      run(physics, 0.5);
+      const rest = physics.getBallState();
+      expect(rest.position.z).toBeGreaterThan(3.2);
+      expect(rest.position.z).toBeLessThan(inPath.z);
+      expect(Math.hypot(rest.velocity.x, rest.velocity.y, rest.velocity.z)).toBeLessThan(0.5);
     });
   });
 });

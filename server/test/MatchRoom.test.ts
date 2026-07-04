@@ -1252,4 +1252,129 @@ describe('MatchRoom', () => {
       expect(drained).toBe(true);
     }, 30000);
   });
+
+  // ---- M9: abilities (room wiring) -------------------------------------------
+
+  describe('M9 abilities', () => {
+    it('WALL: a drive stops dead at the whale and the play resolves without a caught-from-stop', async () => {
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+
+      // Custom draft: B takes the whale FIRST, then kian. Among B's five
+      // (whale pitch 4, kian 8, josh 6, darcy 6, robbie 5) kian remains the
+      // best arm, so the default pitcher is unchanged from the standard draft.
+      const picksA = ['carl', 'laurie', 'joel', 'jonty', 'joe'];
+      const picksB = ['whale', 'kian', 'josh', 'darcy', 'robbie'];
+      let a = 0;
+      let b = 0;
+      while (room.state.draftTurn !== '') {
+        const turn = room.state.draftTurn;
+        const id = (turn === 'A' ? picksA[a++] : picksB[b++]) ?? '';
+        const picker = turn === 'A' ? clientA : clientB;
+        const before = room.state.squadAIds.length + room.state.squadBIds.length;
+        picker.send('draftPick', { id });
+        await waitForCondition(room, () => room.state.squadAIds.length + room.state.squadBIds.length > before);
+      }
+      await waitForPhase(room, 'INITIAL_POSITIONING');
+      expect(room.state.currentPitcherId).toBe('kian');
+      expect(room.state.fielders.get('whale')).toBeDefined();
+
+      // Park the whale DEEP on the corridor of the standard flat drive (M8
+      // reposition). Deep, not mid-pitch, deliberately: nearest to the rolling
+      // ball's predicted gather point he becomes the CHASER, whose pursuit runs
+      // ALONG the ball's x≈0 line — as post-1 cover (his role when parked
+      // nearer the batter) he instead drifts laterally towards post 1 while
+      // the ball approaches, and blocker contact becomes a jittery near-miss.
+      clientB.send('reposition', { id: 'whale', x: 0, z: 24 });
+      await waitForCondition(room, () => room.state.fielders.get('whale')?.z === 24);
+
+      await startPlay(room, clientA, clientB);
+      await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
+
+      // The drive must die at the whale: ball speed collapses while it is near him.
+      let stoppedNearWhale = false;
+      for (let i = 0; i < 600 && room.state.phase === 'PLAY'; i += 1) {
+        await room.waitForNextSimulationTick();
+        const whale = room.state.fielders.get('whale');
+        if (whale === undefined || !room.state.ballLive) continue;
+        const d = Math.hypot(room.state.ball.x - whale.x, room.state.ball.z - whale.z);
+        const speed = Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
+        if (d < 1.5 && speed < 0.5) stoppedNearWhale = true;
+      }
+      expect(stoppedNearWhale).toBe(true);
+
+      // The play still resolves, and the stop itself is never a catch
+      // (ALWAYS_MISS: no roll ever wins, so any 'caught' here could only come
+      // from the blocker contact being misclassified).
+      expect(room.state.phase).not.toBe('PLAY');
+      const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
+      expect(res.cause.kind).not.toBe('caught');
+    }, 30000);
+
+    it('CLUTCH_SWING: carl’s identical drive leaves the bat faster in the final innings than in innings 1', async () => {
+      // exitVelocity(power 8, t) ≤ 34 m/s in innings 1; in the final innings
+      // CLUTCH adds +3 (uncapped power 11 → 43·t) with pressureMult(nerve 8)
+      // = 0.97 on timing, so even worst-case timing jitter (t ≥ ~0.84 under
+      // the near-plane harness) keeps the final drive ≥ ~35 m/s — a real
+      // margin over the innings-1 ceiling. Compare measured to measured.
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_CATCH });
+      const { clientA, clientB } = await connectPair(room);
+
+      /** |ball velocity| on the first synced tick after contact (vz flips positive). */
+      async function exitSpeed(): Promise<number> {
+        for (let i = 0; i < 30; i += 1) {
+          if (room.state.ball.vz > 1) {
+            return Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
+          }
+          await room.waitForNextSimulationTick();
+        }
+        throw new Error('exit velocity never observed');
+      }
+
+      // Innings 1, play 1: carl opens with the flat drive at the bowler
+      // (ALWAYS_CATCH — caught, which is also the queue-drain idiom).
+      await startPlay(room, clientA, clientB);
+      expect(room.state.inningsIndex).toBe(0);
+      expect(room.state.currentBatterId).toBe('carl');
+      await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
+      const inningsOneSpeed = await exitSpeed();
+      await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
+
+      // Drain the first innings pair (A then B, one caught batter per play)
+      // until A's SECOND innings — the final pair, where isFinalInnings holds.
+      let plays = 0;
+      while (room.state.inningsIndex < 2 && room.state.phase !== 'GAME_OVER' && plays < 12) {
+        await startPlay(room, clientA, clientB);
+        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
+        await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
+        plays += 1;
+      }
+      expect(room.state.inningsIndex).toBe(2);
+      expect(room.state.battingSide).toBe('A');
+
+      // Final innings: make sure carl bats (fresh queue should open with him;
+      // setBatter guards against any other rotation).
+      if (room.state.currentBatterId !== 'carl') {
+        battingClient(room, clientA, clientB).send('setBatter', { id: 'carl' });
+        await waitForCondition(room, () => room.state.currentBatterId === 'carl');
+      }
+      await startPlay(room, clientA, clientB);
+      await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
+      const finalInningsSpeed = await exitSpeed();
+      await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
+
+      // Discriminate against the ABSOLUTE no-clutch ceiling, not just the
+      // measured innings-1 swing: harness timing jitter moves each single
+      // capture by a few m/s, so measured-vs-measured margins flake in both
+      // directions. Without CLUTCH carl's drive can NEVER exceed
+      // exitVelocity(8, 1) = 34.0 m/s — and in the final innings pressureMult
+      // (nerve 8 → 0.97) caps it at 33.0. With +3 (power 11, uncapped) the same
+      // swing reaches ~41.7 at perfect timing, so > 34.2 is only reachable via
+      // the bonus, with the timing draw needing t > 0.82 (observed 0.85–1.0).
+      expect(inningsOneSpeed).toBeLessThan(34.05); // sanity: no bonus in innings 1
+      expect(finalInningsSpeed).toBeGreaterThan(34.2); // impossible without CLUTCH_SWING
+      expect(finalInningsSpeed).toBeGreaterThan(inningsOneSpeed); // and higher than the identical innings-1 drive
+    }, 120000);
+  });
 });

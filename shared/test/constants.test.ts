@@ -229,6 +229,11 @@ describe('constants', () => {
     it('pins the spin-read penalty weight to 0.25', () => {
       expect(CONST.ABILITY.SPIN_READ_W).toBe(0.25);
     });
+
+    it('pins the WALL blocker capsule to 0.9 m half-height and 0.4 m radius', () => {
+      expect(CONST.ABILITY.WALL_BLOCKER_HALF_HEIGHT).toBe(0.9);
+      expect(CONST.ABILITY.WALL_BLOCKER_RADIUS).toBe(0.4);
+    });
   });
 
   describe('FIELD — placeholder geometry (spec §8b)', () => {

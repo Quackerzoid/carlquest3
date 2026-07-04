@@ -139,6 +139,10 @@ const ABILITY = {
   POWERHOUSE_FATIGUE_FLOOR: 2,
   /** USER-APPROVED invented weight (M9 design doc §1): spin-read penalty = 1 - SPIN_READ_W·s01(spin)·|spinInput|. */
   SPIN_READ_W: 0.25,
+  /** WALL blocker capsule half-height in metres (spec silent on size; M9 design decision — whale-sized, total height 2.6 m). */
+  WALL_BLOCKER_HALF_HEIGHT: 0.9,
+  /** WALL blocker capsule radius in metres (M9 design decision). */
+  WALL_BLOCKER_RADIUS: 0.4,
 } as const;
 
 function deepFreeze<T extends object>(obj: T): T {

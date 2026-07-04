@@ -109,7 +109,10 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
   // deliberately logical entities, never Rapier bodies (M4 design doc), so the
   // ball stays this world's ONLY dynamic body and placeBall's accumulator reset
   // remains safe — closing the M2 caveat recorded in CLAUDE.md §6.2.
-  const blockers = new Map<string, RAPIER.RigidBody>();
+  const blockers = new Map<string, { body: RAPIER.RigidBody; colliderHandle: number }>();
+  // Collider handles of all live blockers, for O(1) attribution when draining
+  // contact events (WALL stop-dead, Milestone 9).
+  const blockerColliderHandles = new Set<number>();
 
   // Drained every substep; `true` = auto-clear drained events.
   const eventQueue = new RAPIER.EventQueue(true);
@@ -226,7 +229,18 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
           const other = handle1 === ball ? handle2 : handle2 === ball ? handle1 : null;
           if (other === null) return;
           const postIndex = postSensorIndexByHandle.get(other);
-          if (postIndex !== undefined) postsCrossed.add(postIndex);
+          if (postIndex !== undefined) {
+            postsCrossed.add(postIndex);
+            return;
+          }
+          // Ball↔blocker CONTACT (WALL, Milestone 9): the ball "stops dead" —
+          // both velocities are zeroed the substep the contact starts, undoing
+          // any restitution rebound the solver just applied. Gravity is left
+          // alone, so the stopped ball simply drops (spec §3 / M9 design doc).
+          if (blockerColliderHandles.has(other)) {
+            ballBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+            ballBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+          }
         });
         accumulator -= PHYSICS.FIXED_TIMESTEP;
       }
@@ -269,20 +283,28 @@ export async function createPhysicsModule(): Promise<PhysicsModule> {
     setBlocker(id: string, position: Vec3, halfHeight: number, radius: number): void {
       const existing = blockers.get(id);
       if (existing !== undefined) {
-        existing.setTranslation(position, true); // reposition, never duplicate
+        existing.body.setTranslation(position, true); // reposition, never duplicate
         return;
       }
       const body = world.createRigidBody(
         RAPIER.RigidBodyDesc.fixed().setTranslation(position.x, position.y, position.z),
       );
-      world.createCollider(RAPIER.ColliderDesc.capsule(halfHeight, radius), body);
-      blockers.set(id, body);
+      const collider = world.createCollider(
+        RAPIER.ColliderDesc.capsule(halfHeight, radius)
+          // Emit contact events so step() can stop the ball dead on contact
+          // (WALL, Milestone 9). Observational; the solver is unchanged.
+          .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+        body,
+      );
+      blockerColliderHandles.add(collider.handle);
+      blockers.set(id, { body, colliderHandle: collider.handle });
     },
 
     clearBlocker(id: string): void {
-      const body = blockers.get(id);
-      if (body === undefined) return;
-      world.removeRigidBody(body); // attached colliders are removed with the body
+      const entry = blockers.get(id);
+      if (entry === undefined) return;
+      blockerColliderHandles.delete(entry.colliderHandle);
+      world.removeRigidBody(entry.body); // attached colliders are removed with the body
       blockers.delete(id);
     },
 

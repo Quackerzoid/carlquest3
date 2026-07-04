@@ -4,10 +4,13 @@ import {
   CONST,
   createRng,
   getCharacter,
+  hitAbilityMods,
+  pitchAbilityMods,
   type Character,
   type DraftPickInput,
   type FielderSetup,
   type MatchPhase,
+  type PitchAbilityMods,
   type PitchInput,
   type PlayOutcome,
   type RepositionInput,
@@ -21,14 +24,21 @@ import {
 import { createPositioningModule } from '../modules/PositioningModule';
 import { createPhysicsModule, type PhysicsModule } from '../modules/PhysicsModule';
 import { resolvePitch } from '../modules/PitchModule';
-import { NEUTRAL_SWING_CONTEXT, resolveSwing } from '../modules/HitModule';
+import { resolveSwing } from '../modules/HitModule';
 import { createFieldingModule, type FieldingDeps, type FieldingEvent, type FieldingModule } from '../modules/FieldingModule';
 import { createRunningModule, type RunnerView } from '../modules/RunningModule';
 import { createRulesModule } from '../modules/RulesModule';
 import { createDraftModule, picksEach } from '../modules/DraftModule';
 import { FielderSchema, MatchState, RunnerSchema } from './MatchState';
 
-const { PHYSICS, GAME, FIELD } = CONST;
+const { PHYSICS, GAME, FIELD, ABILITY } = CONST;
+
+/**
+ * The one roster character whose WALL ability the room wires directly (spec §3):
+ * their fielding position doubles as a physical blocker capsule while the ball
+ * is live post-contact. Derived from the roster, not a hard-coded id.
+ */
+const WALL_FIELDER_ID = CHARACTERS.find((c) => c.ability === 'WALL')?.id ?? '';
 
 type SwingMessage = SwingInput & { timing: number };
 
@@ -135,6 +145,19 @@ export class MatchRoom extends Room<MatchState> {
   private swung = false;
   /** True from bat contact until the play ends — gates fielding/running/outcome resolution. */
   private contactMade = false;
+  /**
+   * The delivering pitcher's ability mods, captured at each handlePitch (M9).
+   * Neutral until the first pitch; a swing can only follow a pitch (ballLive
+   * gate), so resolveSwing always sees the mods of the pitch it faces.
+   */
+  private currentPitcherMods: PitchAbilityMods = {
+    pitchStatBonus: 0,
+    spinCurveMult: 1,
+    curveOnsetFraction: 0,
+    batterTimingWindowMult: 1,
+  };
+  /** The delivered pitch's clamped spin input (spin-read penalty fact), captured at handlePitch (M9). */
+  private lastPitchSpinInput = 0;
   private liveSince = 0;
   private restSince: number | null = null;
   /**
@@ -610,7 +633,14 @@ export class MatchRoom extends Room<MatchState> {
       return;
     }
     const pitcher = getCharacter(this.state.currentPitcherId);
-    const params = resolvePitch(pitcher.stats, { aim: m.aim, spinInput: m.spinInput });
+    // M9: the pitcher's ability mods shape the pitch (CANNON_ARM speed,
+    // CURVEBALL_MASTER spin/onset) and are held for the coming swing's context
+    // (CANNON_ARM window shrink, spin-read facts). Spin input is clamped to the
+    // same [-1, 1] the pitch actually flies with (resolvePitch clamps internally).
+    const mods = pitchAbilityMods(pitcher);
+    const params = resolvePitch(pitcher.stats, { aim: m.aim, spinInput: m.spinInput }, mods);
+    this.currentPitcherMods = mods;
+    this.lastPitchSpinInput = Math.max(-1, Math.min(1, m.spinInput));
     this.physics.applyPitch(params);
     this.state.ballLive = true;
     this.contactMade = false;
@@ -654,8 +684,15 @@ export class MatchRoom extends Room<MatchState> {
     }
     const batter = getCharacter(batterId);
     const pressure = this.rules.pressure(this.runnersOnPosts());
+    // M9: the full ability context replaces the Task-3 neutral stopgap — the
+    // batter's own mods, the rules' final-innings gate (CLUTCH_SWING), and the
+    // delivering pitcher's window/spin facts captured at handlePitch.
     const result = resolveSwing(batter.stats, { aim: m.aim, spinInput: m.spinInput }, error, {
-      ...NEUTRAL_SWING_CONTEXT,
+      mods: hitAbilityMods(batter),
+      isFinalInnings: this.rules.isFinalInnings(),
+      timingWindowMult: this.currentPitcherMods.batterTimingWindowMult,
+      pitcherSpinStat: getCharacter(this.state.currentPitcherId).stats.spin,
+      pitchSpinInput: this.lastPitchSpinInput,
       pressure,
     });
     if (!result.contact) {
@@ -769,6 +806,7 @@ export class MatchRoom extends Room<MatchState> {
     this.builtFieldingSide = null;
     this.rebuildFielding();
     this.syncPositioning();
+    this.physics.clearBlocker(WALL_FIELDER_ID); // WALL is per live post-contact ball (M9)
     this.physics.spawnBall();
     this.state.ballLive = false;
     this.contactMade = false;
@@ -800,6 +838,12 @@ export class MatchRoom extends Room<MatchState> {
     const dt = Math.min(deltaMs / 1000, PHYSICS.SIM_MAX_CATCHUP);
     this.simTime += dt;
     if (!this.state.ballLive) return;
+
+    // WALL (M9): while the ball is live post-contact — the same window the
+    // fielder AI runs — the blocker capsule shadows the whale's position.
+    // Updated BEFORE the step so this tick's substeps collide with where he
+    // currently stands; cleared whenever he is not on the fielding side's field.
+    if (this.contactMade) this.updateWallBlocker();
 
     const beforePos = this.physics.getBallState().position;
     this.physics.step(dt);
@@ -846,6 +890,28 @@ export class MatchRoom extends Room<MatchState> {
       this.physics.spawnBall();
       this.restSince = null;
     }
+  }
+
+  /**
+   * Upsert the WALL blocker capsule at the whale's current fielding position,
+   * or remove it when the whale is not on the field this play (M9, spec §3).
+   * Derives presence from the fielding module's live fielders — the whale can
+   * only block while drafted AND fielding. The capsule's centre height puts
+   * its lower cap on the ground. The whale still fields normally (chase/catch);
+   * the blocker is additional.
+   */
+  private updateWallBlocker(): void {
+    const whale = this.fielding.getFielders().find((f) => f.id === WALL_FIELDER_ID);
+    if (whale === undefined) {
+      this.physics.clearBlocker(WALL_FIELDER_ID);
+      return;
+    }
+    this.physics.setBlocker(
+      WALL_FIELDER_ID,
+      { x: whale.x, y: ABILITY.WALL_BLOCKER_HALF_HEIGHT + ABILITY.WALL_BLOCKER_RADIUS, z: whale.z },
+      ABILITY.WALL_BLOCKER_HALF_HEIGHT,
+      ABILITY.WALL_BLOCKER_RADIUS,
+    );
   }
 
   /** Updates the rest/timeout latch from the current ball state; returns whether the play should end for that reason. */
@@ -965,6 +1031,7 @@ export class MatchRoom extends Room<MatchState> {
 
     this.state.ballLive = false;
     this.contactMade = false;
+    this.physics.clearBlocker(WALL_FIELDER_ID); // WALL is per live post-contact ball (M9)
     this.physics.spawnBall();
     this.fielding.reset();
     this.restSince = null;
