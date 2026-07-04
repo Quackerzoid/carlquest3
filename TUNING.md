@@ -19,6 +19,19 @@ elsewhere.
 | `GAME.CATCH_HEIGHT_MAX` | `2.5` (m) | Balls above this height are "over everyone's head" — no catch attempt. | A capsule fielder is ~1.4 m + reach; 2.5 m allows a modest jump/reach. If lofted hits are being caught unrealistically high, lower; if easy pop-ups sail uncaught, raise. |
 | `FIELD.FIELDING_POSITIONS` | 9-slot placeholder layout | Default fielder standing positions (slot 0 = bowling square, slot 1 = backstop, 2–5 mind posts 1–4, 6–8 deep field). | Entirely provisional school-rounders geometry. Real positioning UI lands in M8; expect wholesale replacement. Note slot 0 must stay equal to `BOWLING_SQUARE` so the bowler and fielding slot 0 cannot drift apart. |
 
+## Milestone 5 — Rules engine (observed 2026-07-03)
+
+- **A live full rounder is unreachable with current tunables.** The post circuit
+  is ~47.4 m (batting square → posts 1–4 at the placeholder coordinates) and the
+  fastest roster runner covers ~6.35 m/s (Carl, speed 7 → `moveSpeed` 6.35 with
+  full stamina), needing ~7.5 s — but `GAME.PLAY_TIMEOUT_S = 6` ends the play
+  first, so `{kind:'rounder'}` (+2 halves) can never occur in a real play; the
+  best live score is a half-rounder. The path is fully covered by RulesModule
+  unit tests. Fix candidates for playtest: raise `PLAY_TIMEOUT_S` to ~9 s (also
+  fixes the M3 despawn-mid-air note below), shrink the post circuit, or raise
+  `MOVE_MAX`. Tune together with `THROW_RELEASE_DELAY_S` — a longer play gives
+  fielders more run-out windows, so rounders should stay rare, not impossible.
+
 ## Carried over from earlier milestones
 
 - **Max-power hit vs `PLAY_TIMEOUT_S` (M3).** A max-power 60°-elevation hit flies

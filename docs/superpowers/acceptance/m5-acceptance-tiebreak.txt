@@ -1,0 +1,152 @@
+[0.1s] joined room IXNRXO-Cb (mode=tiebreak, seed=7)
+[0.1s] phase: (joining) → INITIAL_POSITIONING | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[0.1s] rejected: {"message":"pitch","phase":"INITIAL_POSITIONING","reason":"pitch only allowed in PLAY (phase INITIAL_POSITIONING)"}
+[0.1s] phase: INITIAL_POSITIONING → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[0.2s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[0.6s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["carl"],"scoreDeltaHalves":0,"batterId":"carl"}
+[0.6s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 1 | batting A | batter kian
+[0.7s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 1 | batting A | batter kian
+[1.1s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["kian"],"scoreDeltaHalves":0,"batterId":"kian"}
+[1.1s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 2 | batting A | batter laurie
+[1.2s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 2 | batting A | batter laurie
+[7.2s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"laurie"},"outs":[],"scoreDeltaHalves":0,"batterId":"laurie"}
+[7.2s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 2 | batting A | batter josh
+[7.2s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 2 | batting A | batter josh
+[7.7s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["josh"],"scoreDeltaHalves":0,"batterId":"josh"}
+[7.7s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 3 | batting A | batter joel
+[7.8s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 3 | batting A | batter joel
+[8.2s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["joel"],"scoreDeltaHalves":0,"batterId":"joel"}
+[8.2s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 4 | batting A | batter darcy
+[8.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 4 | batting A | batter darcy
+[8.7s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["darcy"],"scoreDeltaHalves":0,"batterId":"darcy"}
+[8.7s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 5 | batting A | batter jonty
+[8.8s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 5 | batting A | batter jonty
+[9.2s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["jonty"],"scoreDeltaHalves":0,"batterId":"jonty"}
+[9.2s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 6 | batting A | batter robbie
+[9.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 6 | batting A | batter robbie
+[15.3s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"robbie"},"outs":[],"scoreDeltaHalves":0,"batterId":"robbie"}
+[15.3s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 6 | batting A | batter joe
+[15.4s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 6 | batting A | batter joe
+[15.8s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["joe"],"scoreDeltaHalves":0,"batterId":"joe"}
+[15.9s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 7 | batting A | batter ricy
+[15.9s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 7 | batting A | batter ricy
+[16.3s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["ricy"],"scoreDeltaHalves":0,"batterId":"ricy"}
+[16.4s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 8 | batting A | batter whale
+[16.4s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 8 | batting A | batter whale
+[18.6s] playOutcome: {"cause":{"kind":"runOut","atPost":1,"runnerId":"whale"},"outs":["whale"],"scoreDeltaHalves":0,"batterId":"whale"}
+[18.6s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 0 | batting B | batter carl
+[18.6s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 0 | batting B | batter carl
+[19.1s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["carl"],"scoreDeltaHalves":0,"batterId":"carl"}
+[19.1s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 1 | batting B | batter kian
+[19.1s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 1 | batting B | batter kian
+[19.6s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["kian"],"scoreDeltaHalves":0,"batterId":"kian"}
+[19.6s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 2 | batting B | batter laurie
+[19.7s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 2 | batting B | batter laurie
+[20.2s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["laurie"],"scoreDeltaHalves":0,"batterId":"laurie"}
+[20.2s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 3 | batting B | batter josh
+[20.2s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 3 | batting B | batter josh
+[20.7s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["josh"],"scoreDeltaHalves":0,"batterId":"josh"}
+[20.7s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 4 | batting B | batter joel
+[20.8s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 4 | batting B | batter joel
+[21.2s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["joel"],"scoreDeltaHalves":0,"batterId":"joel"}
+[21.2s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 5 | batting B | batter darcy
+[21.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 5 | batting B | batter darcy
+[27.3s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"darcy"},"outs":[],"scoreDeltaHalves":0,"batterId":"darcy"}
+[27.3s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 5 | batting B | batter jonty
+[27.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 5 | batting B | batter jonty
+[27.7s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["jonty"],"scoreDeltaHalves":0,"batterId":"jonty"}
+[27.7s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 6 | batting B | batter robbie
+[27.8s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 6 | batting B | batter robbie
+[28.2s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["robbie"],"scoreDeltaHalves":0,"batterId":"robbie"}
+[28.2s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 7 | batting B | batter joe
+[28.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 7 | batting B | batter joe
+[28.7s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["joe"],"scoreDeltaHalves":0,"batterId":"joe"}
+[28.8s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 8 | batting B | batter ricy
+[28.8s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 8 | batting B | batter ricy
+[34.2s] playOutcome: {"cause":{"kind":"runOut","atPost":3,"runnerId":"darcy"},"outs":["darcy"],"scoreDeltaHalves":0,"batterId":"ricy"}
+[34.2s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 9 | batting B | batter whale
+[34.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 9 | batting B | batter whale
+[40.3s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"whale"},"outs":[],"scoreDeltaHalves":0,"batterId":"whale"}
+[40.3s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 3 | outs 0 | batting A | batter carl
+[40.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 3 | outs 0 | batting A | batter carl
+[46.4s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"carl"},"outs":[],"scoreDeltaHalves":0,"batterId":"carl"}
+[46.4s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 3 | outs 0 | batting A | batter kian
+[46.4s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 3 | outs 0 | batting A | batter kian
+[46.9s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["kian"],"scoreDeltaHalves":0,"batterId":"kian"}
+[46.9s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 3 | outs 1 | batting A | batter laurie
+[46.9s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 3 | outs 1 | batting A | batter laurie
+[47.4s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["laurie"],"scoreDeltaHalves":0,"batterId":"laurie"}
+[47.4s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 3 | outs 2 | batting A | batter josh
+[47.4s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 3 | outs 2 | batting A | batter josh
+[47.9s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["josh"],"scoreDeltaHalves":0,"batterId":"josh"}
+[47.9s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 3 | outs 3 | batting A | batter joel
+[48.0s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 3 | outs 3 | batting A | batter joel
+[48.4s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["joel"],"scoreDeltaHalves":0,"batterId":"joel"}
+[48.4s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 3 | outs 4 | batting A | batter darcy
+[48.5s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 3 | outs 4 | batting A | batter darcy
+[48.9s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["darcy"],"scoreDeltaHalves":0,"batterId":"darcy"}
+[48.9s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 3 | outs 5 | batting A | batter jonty
+[49.0s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 3 | outs 5 | batting A | batter jonty
+[49.4s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["jonty"],"scoreDeltaHalves":0,"batterId":"jonty"}
+[49.4s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 3 | outs 6 | batting A | batter robbie
+[49.5s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 3 | outs 6 | batting A | batter robbie
+[51.6s] playOutcome: {"cause":{"kind":"runOut","atPost":1,"runnerId":"robbie"},"outs":["robbie"],"scoreDeltaHalves":0,"batterId":"robbie"}
+[51.6s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 3 | outs 7 | batting A | batter joe
+[51.6s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 3 | outs 7 | batting A | batter joe
+[52.1s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["joe"],"scoreDeltaHalves":0,"batterId":"joe"}
+[52.1s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 3 | outs 8 | batting A | batter ricy
+[52.2s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 3 | outs 8 | batting A | batter ricy
+[52.6s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["ricy"],"scoreDeltaHalves":0,"batterId":"ricy"}
+[52.6s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 3 | outs 9 | batting A | batter whale
+[52.7s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 3 | outs 9 | batting A | batter whale
+[58.7s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"whale"},"outs":[],"scoreDeltaHalves":0,"batterId":"whale"}
+[58.7s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 0 | batting B | batter carl
+[58.7s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 0 | batting B | batter carl
+[64.7s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"carl"},"outs":[],"scoreDeltaHalves":0,"batterId":"carl"}
+[64.8s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 0 | batting B | batter kian
+[64.8s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 0 | batting B | batter kian
+[65.3s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["kian"],"scoreDeltaHalves":0,"batterId":"kian"}
+[65.3s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 1 | batting B | batter laurie
+[65.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 1 | batting B | batter laurie
+[65.8s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["laurie"],"scoreDeltaHalves":0,"batterId":"laurie"}
+[65.8s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 2 | batting B | batter josh
+[65.9s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 2 | batting B | batter josh
+[70.2s] playOutcome: {"cause":{"kind":"runOut","atPost":3,"runnerId":"carl"},"outs":["carl"],"scoreDeltaHalves":0,"batterId":"josh"}
+[70.2s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 3 | batting B | batter joel
+[70.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 3 | batting B | batter joel
+[70.7s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["joel"],"scoreDeltaHalves":0,"batterId":"joel"}
+[70.8s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 4 | batting B | batter darcy
+[70.8s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 4 | batting B | batter darcy
+[71.3s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["darcy"],"scoreDeltaHalves":0,"batterId":"darcy"}
+[71.3s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 5 | batting B | batter jonty
+[71.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 5 | batting B | batter jonty
+[73.8s] playOutcome: {"cause":{"kind":"runOut","atPost":1,"runnerId":"jonty"},"outs":["jonty"],"scoreDeltaHalves":0,"batterId":"jonty"}
+[73.8s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 6 | batting B | batter robbie
+[73.9s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 6 | batting B | batter robbie
+[79.9s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"robbie"},"outs":[],"scoreDeltaHalves":0,"batterId":"robbie"}
+[79.9s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 6 | batting B | batter joe
+[80.0s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 6 | batting B | batter joe
+[86.0s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"joe"},"outs":[],"scoreDeltaHalves":0,"batterId":"joe"}
+[86.0s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 6 | batting B | batter ricy
+[86.1s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 6 | batting B | batter ricy
+[86.5s] playOutcome: {"cause":{"kind":"caught","by":"kian"},"outs":["ricy"],"scoreDeltaHalves":0,"batterId":"ricy"}
+[86.5s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 7 | batting B | batter whale
+[86.6s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 7 | batting B | batter whale
+[92.6s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"whale"},"outs":[],"scoreDeltaHalves":0,"batterId":"whale"}
+[92.6s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 7 | batting B | batter josh
+[92.6s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 7 | batting B | batter josh
+[98.7s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"josh"},"outs":[],"scoreDeltaHalves":0,"batterId":"josh"}
+[98.7s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 4 | outs 0 | batting A | batter carl | TIEBREAK
+[98.7s] === SUDDEN-DEATH TIEBREAK ENTERED ===
+[98.7s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 4 | outs 0 | batting A | batter carl | TIEBREAK
+[104.7s] playOutcome: {"cause":{"kind":"safe","atPost":3,"runnerId":"carl"},"outs":[],"scoreDeltaHalves":1,"batterId":"carl"}
+[104.7s] phase: PLAY → PRE_PLAY | A 1½ – B 0½ | innings 4 | outs 0 | batting B | batter carl | TIEBREAK
+[104.8s] phase: PRE_PLAY → PLAY | A 1½ – B 0½ | innings 4 | outs 0 | batting B | batter carl | TIEBREAK
+[110.8s] playOutcome: {"cause":{"kind":"safe","atPost":1,"runnerId":"carl"},"outs":[],"scoreDeltaHalves":0,"batterId":"carl"}
+[110.8s] phase: PLAY → GAME_OVER | A 1½ – B 0½ | innings 4 | outs 0 | batting B | batter carl | TIEBREAK
+[110.8s] === GAME OVER ===
+[110.8s] plays driven: 47; innings switches observed: 3
+[110.8s] final score: A 1½ – B 0½; winner: A; tiebreak: true
+[110.9s] outcome tally: {"caught":29,"runOut":5,"safe":13,"rounder":0}; rejections observed: 1
+[110.9s] lastOutcome schema field: {"cause":{"kind":"safe","atPost":1,"runnerId":"carl"},"outs":[],"scoreDeltaHalves":0,"batterId":"carl"}
+[110.9s] ACCEPTANCE PASSED (tiebreak)
