@@ -129,7 +129,11 @@ export function createDraftScreen(container: HTMLElement, net: Net): DraftScreen
           const mySquad = mySide === 'A' ? squadAIds : squadBIds;
           const inSquad = mySquad.includes(id);
           row.hidden = !inSquad;
-          if (!inSquad) continue;
+          if (!inSquad) {
+            badge.textContent = '';
+            row.classList.remove('is-taken');
+            continue;
+          }
           const isBowler = state.currentPitcherId === id;
           row.disabled = isBowler;
           row.classList.toggle('is-taken', isBowler);
