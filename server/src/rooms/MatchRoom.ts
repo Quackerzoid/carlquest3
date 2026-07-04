@@ -21,7 +21,7 @@ import {
 import { createPositioningModule } from '../modules/PositioningModule';
 import { createPhysicsModule, type PhysicsModule } from '../modules/PhysicsModule';
 import { resolvePitch } from '../modules/PitchModule';
-import { resolveSwing } from '../modules/HitModule';
+import { NEUTRAL_SWING_CONTEXT, resolveSwing } from '../modules/HitModule';
 import { createFieldingModule, type FieldingDeps, type FieldingEvent, type FieldingModule } from '../modules/FieldingModule';
 import { createRunningModule, type RunnerView } from '../modules/RunningModule';
 import { createRulesModule } from '../modules/RulesModule';
@@ -654,7 +654,10 @@ export class MatchRoom extends Room<MatchState> {
     }
     const batter = getCharacter(batterId);
     const pressure = this.rules.pressure(this.runnersOnPosts());
-    const result = resolveSwing(batter.stats, { aim: m.aim, spinInput: m.spinInput }, error, 1, pressure);
+    const result = resolveSwing(batter.stats, { aim: m.aim, spinInput: m.spinInput }, error, {
+      ...NEUTRAL_SWING_CONTEXT,
+      pressure,
+    });
     if (!result.contact) {
       // A legal swing that missed: not a rejection. The ball flies on and the
       // play ends at rest/timeout with no contact (respawn, same batter re-pitches).

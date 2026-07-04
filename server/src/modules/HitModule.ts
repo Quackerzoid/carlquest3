@@ -7,8 +7,10 @@ import {
   exitVelocity,
   hitSpin,
   pressureMult,
+  spinReadPenalty,
   timingFactor,
   timingWindow,
+  type HitAbilityMods,
   type HitParams,
   type StatBlock,
   type SwingInput,
@@ -21,6 +23,41 @@ const DEG_TO_RAD = Math.PI / 180;
 export type SwingResult =
   | { contact: true; params: HitParams; timingFactor: number }
   | { contact: false };
+
+/**
+ * Ability/rules context a swing resolves against (Milestone 9, spec §3/§9.9).
+ * REPLACES the old `windowMult`/`pressure` positional params — MatchRoom
+ * (Task 5) threads the real values; everything else defaults to neutral.
+ */
+export interface SwingContext {
+  /** The batter's HitAbilityMods (neutral default: no ability effect). */
+  mods: HitAbilityMods;
+  /** rules.isFinalInnings() — gates CLUTCH_SWING's power bonus. */
+  isFinalInnings: boolean;
+  /** Pitcher's CANNON_ARM batterTimingWindowMult (neutral 1). */
+  timingWindowMult: number;
+  /** Spin-read penalty inputs: pitcher's spin stat and the pitch's spinInput (neutral 0 -> penalty 1). */
+  pitcherSpinStat: number;
+  pitchSpinInput: number;
+  /** RulesModule high-pressure flag (absorbs the old positional param). */
+  pressure: boolean;
+}
+
+const NEUTRAL_HIT_MODS: HitAbilityMods = {
+  clutchPowerBonus: 0,
+  powerBaseBonus: 0,
+  powerBaseMaxError: 0,
+  spinReadImmune: false,
+};
+
+export const NEUTRAL_SWING_CONTEXT: SwingContext = {
+  mods: NEUTRAL_HIT_MODS,
+  isFinalInnings: false,
+  timingWindowMult: 1,
+  pitcherSpinStat: 0,
+  pitchSpinInput: 0,
+  pressure: false,
+};
 
 function isFiniteVec(v: Vec3): boolean {
   return Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
@@ -57,18 +94,26 @@ export function resolveSwing(
   stats: StatBlock,
   input: SwingInput,
   timingError: number,
-  windowMult = 1, // CANNON_ARM shrinks the batter's window in Milestone 9
-  pressure = false, // RulesModule flags high-pressure states (Milestone 5, spec §5)
+  ctx: SwingContext = NEUTRAL_SWING_CONTEXT,
 ): SwingResult {
-  const window = timingWindow(stats.reflex, windowMult);
+  // Window mult chain: pitcher's CANNON_ARM window shrink, then the spin-read
+  // penalty (skipped entirely for a SWITCH-immune batter).
+  const spinFactor = ctx.mods.spinReadImmune
+    ? 1
+    : spinReadPenalty(ctx.pitcherSpinStat, ctx.pitchSpinInput);
+  const window = timingWindow(stats.reflex, ctx.timingWindowMult * spinFactor);
   let timing = timingFactor(timingError, window);
-  // NaN-safe: a degenerate window (e.g. windowMult 0) can make timingFactor NaN.
+  // NaN-safe: a degenerate window (e.g. timingWindowMult 0) can make timingFactor NaN.
   // `!(timing > 0)` catches both `timing <= 0` and `NaN`, resolving to a miss either way.
   if (!(timing > 0)) return { contact: false };
-  if (pressure) timing *= pressureMult(stats.nerve);
+  if (ctx.pressure) timing *= pressureMult(stats.nerve);
 
   const direction = normaliseAim(input.aim);
-  const speed = exitVelocity(stats.power, timing);
+  const clutchBonus = ctx.isFinalInnings ? ctx.mods.clutchPowerBonus : 0;
+  const powerBaseBonus =
+    Math.abs(timingError) < ctx.mods.powerBaseMaxError ? ctx.mods.powerBaseBonus : 0;
+  const effectivePower = stats.power + clutchBonus + powerBaseBonus;
+  const speed = exitVelocity(effectivePower, timing);
   const spinScalar = Math.max(-1, Math.min(1, input.spinInput));
   return {
     contact: true,
