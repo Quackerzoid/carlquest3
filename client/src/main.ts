@@ -214,6 +214,10 @@ function runMatch(net: Net): void {
     lastPhase = state.phase;
     lastPaused = state.paused;
     ball.update(state.ball.x, state.ball.y, state.ball.z, state.ballLive);
+    // Kit assignments before the per-entity updates, so a post-draft patch builds
+    // new models directly in the right kit (empty pre-draft → everyone neutral).
+    fielders.setTeams([...state.squadAIds], [...state.squadBIds]);
+    runners.setTeams([...state.squadAIds], [...state.squadBIds]);
     fielders.update(state.fielders.values());
     runners.update(state.runners.values());
     if (state.phase === 'LOBBY') {

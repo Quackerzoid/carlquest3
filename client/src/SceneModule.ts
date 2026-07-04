@@ -5,17 +5,19 @@ import { CONST } from '@carlquest/shared';
  * Small-stadium world (visual overhaul). Everything procedural: canvas textures
  * only, no asset files, no shadow maps (software-rasteriser friendly).
  *
- * Rough triangle budget (target ≤ ~60k whole scene):
+ * Triangle budget, measured (Task-2 review numbers, renderer.info):
  *   ground plane                        2
- *   sky dome (16×12 sphere)          ~384
- *   terraced stands (instanced)     ~2 300  (≈190 boxes × 12)
- *   crowd (instanced cones)         30 000  (3 000 × 10)
- *   hoardings (merged quads)          ~90
- *   posts + flags                    ~150
- *   floodlight pylons                ~250
+ *   sky dome (16×12 sphere)           352
+ *   terraced stands (instanced)     2 112  (176 boxes × 12)
+ *   crowd (instanced cones)        45 000  (3 000 × 15)
+ *   hoardings (merged quads)           88
+ *   posts                             128
+ *   flags                               8
+ *   floodlight masts                   96
+ *   lamp heads                          8
  *   ------------------------------------------
- *   total                          ~33 200  — well inside budget, leaving
- *   headroom for the character models added by RenderModule.
+ *   total                          47 794  — leaves headroom for the character
+ *   models added by RenderModule (whole scene target ≤ ~75k with ~11 figures).
  */
 
 /** Deterministic local LCG — client visuals only (do NOT import the server rng). */
