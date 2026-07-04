@@ -26,6 +26,11 @@ export interface AttachedInput {
 export function attachInput(net: Net, onLocalAction: (text: string) => void): AttachedInput {
   const state: InputState = { spin: 0 };
   const handleKeydown = (event: KeyboardEvent): void => {
+    // Gameplay keys are inert while the match is paused (unexpected disconnect/reconnect
+    // grace) — Enter/N are handled below this guard since they are phase-checked anyway
+    // and harmless to send (the server would reject them with `paused` regardless).
+    const gameplayKeys = ['KeyA', 'KeyS', 'KeyD', 'KeyP', 'Space', 'KeyR', 'KeyT'];
+    if (gameplayKeys.includes(event.code) && net.room.state.paused === true) return;
     switch (event.code) {
       case 'KeyA':
         state.spin = -1;

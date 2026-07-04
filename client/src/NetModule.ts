@@ -117,20 +117,45 @@ export interface Net {
   onPlayOutcome(callback: (resolution: PlayResolution) => void): void;
   onRejected(callback: (rejection: RejectionEvent) => void): void;
   onOpponentLeft(callback: (side: string) => void): void;
+  /**
+   * Fires ONCE if the room connection drops without us leaving deliberately
+   * (raw socket loss, server crash — NOT consented leave() and NOT after
+   * opponentLeft, both of which are deliberate teardowns).
+   */
+  onUnexpectedDisconnect(callback: () => void): void;
+  /**
+   * One reconnect attempt with the stored token. Resolves a FRESH Net bound to
+   * the recovered room (the old Net is dead — re-run all match wiring against
+   * the new one), or null when the grace expired / token invalid / offline.
+   */
+  tryReconnect(): Promise<Net | null>;
+  /** Mark the next room leave as deliberate (suppresses onUnexpectedDisconnect). */
+  markLeaving(): void;
 }
 
-export async function connect(opts: ConnectOptions): Promise<Net> {
-  const client = new Client(SERVER_URL);
-  const room =
-    opts.mode === 'create'
-      ? await client.create<MatchStateView>('match', { code: generateCode() })
-      : await client.join<MatchStateView>('match', { code: opts.code.trim().toUpperCase() });
+/** Module-level storage for the current room's reconnection token (M10 reconnect surface). */
+let reconnectionToken: string | null = null;
+
+/**
+ * Builds the full `Net` surface around an already-joined/reconnected `room`.
+ * Shared by `connect` and `tryReconnect` so the two paths cannot drift.
+ */
+function wrapRoom(room: Room<MatchStateView>): Net {
+  let leaving = false;
+  let unexpectedDisconnectCallback: (() => void) | null = null;
+
   const mySide = (): 'A' | 'B' | null => {
     if (room.sessionId === room.state.sessionA) return 'A';
     if (room.sessionId === room.state.sessionB) return 'B';
     return null;
   };
-  return {
+
+  room.onLeave(() => {
+    if (leaving) return;
+    unexpectedDisconnectCallback?.();
+  });
+
+  const net: Net = {
     room,
     phase() {
       return room.state.phase;
@@ -181,7 +206,43 @@ export async function connect(opts: ConnectOptions): Promise<Net> {
       room.onMessage('rejected', (rejection: RejectionEvent) => callback(rejection));
     },
     onOpponentLeft(callback) {
-      room.onMessage('opponentLeft', (m: { side: string }) => callback(m.side));
+      room.onMessage('opponentLeft', (m: { side: string }) => {
+        // opponentLeft is a deliberate teardown (either a consented quit or an
+        // expired reconnect grace) — suppress the subsequent unexpected-disconnect
+        // signal that the room close will otherwise also raise.
+        leaving = true;
+        callback(m.side);
+      });
+    },
+    onUnexpectedDisconnect(callback) {
+      unexpectedDisconnectCallback = callback;
+    },
+    async tryReconnect() {
+      const token = reconnectionToken;
+      if (token === null) return null;
+      try {
+        const freshClient = new Client(SERVER_URL);
+        const freshRoom = await freshClient.reconnect<MatchStateView>(token);
+        reconnectionToken = freshRoom.reconnectionToken;
+        return wrapRoom(freshRoom);
+      } catch {
+        return null;
+      }
+    },
+    markLeaving() {
+      leaving = true;
     },
   };
+
+  reconnectionToken = room.reconnectionToken;
+  return net;
+}
+
+export async function connect(opts: ConnectOptions): Promise<Net> {
+  const client = new Client(SERVER_URL);
+  const room =
+    opts.mode === 'create'
+      ? await client.create<MatchStateView>('match', { code: generateCode() })
+      : await client.join<MatchStateView>('match', { code: opts.code.trim().toUpperCase() });
+  return wrapRoom(room);
 }
