@@ -26,17 +26,21 @@ export function attachInput(net: Net, onLocalAction: (text: string) => void): In
         onLocalAction('spin set: +1 (right)');
         break;
       case 'KeyP':
+        if (net.myRole() !== 'fielding') break;
         net.sendPitch({ aim: PITCH_AIM, spinInput: state.spin });
         break;
       case 'Space':
         event.preventDefault();
+        if (net.myRole() !== 'batting') break;
         net.sendSwing({ timing: 0, aim: HIT_AIM, spinInput: 0 });
         break;
       case 'KeyR':
+        if (net.myRole() !== 'batting') break;
         net.sendRunDecision({ go: true });
         onLocalAction('run: go');
         break;
       case 'KeyT':
+        if (net.myRole() !== 'batting') break;
         net.sendRunDecision({ go: false });
         onLocalAction('run: stop');
         break;

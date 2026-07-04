@@ -1,12 +1,44 @@
 import { CHARACTERS, type PlayOutcome, type PlayResolution } from '@carlquest/shared';
 import { createScene } from './SceneModule';
-import { connect, type MatchStateView } from './NetModule';
+import { connect, type MatchStateView, type Net } from './NetModule';
 import { createBallView, createFieldersView, createRunnersView } from './RenderModule';
 import { attachInput } from './InputModule';
 
-const canvas = document.querySelector<HTMLCanvasElement>('#app');
-const status = document.querySelector<HTMLPreElement>('#status');
-if (!canvas || !status) throw new Error('Missing #app canvas or #status line');
+const canvasEl = document.querySelector<HTMLCanvasElement>('#app');
+const statusEl = document.querySelector<HTMLPreElement>('#status');
+const lobbyEl = document.querySelector<HTMLDivElement>('#lobby');
+const lobbySetupEl = document.querySelector<HTMLDivElement>('#lobby-setup');
+const lobbyWaitingEl = document.querySelector<HTMLDivElement>('#lobby-waiting');
+const lobbyCodeEl = document.querySelector<HTMLDivElement>('#lobby-code');
+const lobbyErrorEl = document.querySelector<HTMLParagraphElement>('#lobby-error');
+const createButtonEl = document.querySelector<HTMLButtonElement>('#lobby-create');
+const joinButtonEl = document.querySelector<HTMLButtonElement>('#lobby-join');
+const joinCodeInputEl = document.querySelector<HTMLInputElement>('#join-code');
+if (
+  !canvasEl ||
+  !statusEl ||
+  !lobbyEl ||
+  !lobbySetupEl ||
+  !lobbyWaitingEl ||
+  !lobbyCodeEl ||
+  !lobbyErrorEl ||
+  !createButtonEl ||
+  !joinButtonEl ||
+  !joinCodeInputEl
+) {
+  throw new Error('Missing lobby or #app/#status DOM elements');
+}
+// Rebind as non-null so nested functions below don't need re-narrowing.
+const canvas = canvasEl;
+const status = statusEl;
+const lobby = lobbyEl;
+const lobbySetup = lobbySetupEl;
+const lobbyWaiting = lobbyWaitingEl;
+const lobbyCode = lobbyCodeEl;
+const lobbyError = lobbyErrorEl;
+const createButton = createButtonEl;
+const joinButton = joinButtonEl;
+const joinCodeInput = joinCodeInputEl;
 
 const { scene, start } = createScene(canvas);
 const ball = createBallView(scene);
@@ -14,7 +46,9 @@ const fielders = createFieldersView(scene);
 const runners = createRunnersView(scene);
 start();
 
-const HELP = 'A/S/D spin · P pitch · Space swing · R run · T stop · Enter confirm/ready · N rematch';
+const HELP =
+  'A/S/D spin · P pitch · Space swing · R run · T stop · Enter confirm/ready · N rematch ' +
+  '(keys only act for your own role)';
 
 function characterName(id: string): string {
   // Tolerant lookup for the status line (unlike shared getCharacter, which throws).
@@ -41,46 +75,122 @@ function describeResolution(resolution: PlayResolution): string {
   return parts.join(' · ');
 }
 
-/** `phase | A x½ – B y½ | innings i | outs o | batter: name` + last play + help. */
-function statusLine(state: MatchStateView, lastPlay: string, localAction: string): string {
+/** `phase | A x½ – B y½ | innings i | outs o | batter: name` + side/role + last play + help. */
+function statusLine(net: Net, state: MatchStateView, lastPlay: string, localAction: string): string {
   const score = `A ${String(state.scoreHalvesA)}½ – B ${String(state.scoreHalvesB)}½`;
   const winner = state.winner ? ` | winner: ${state.winner}` : '';
   const tiebreak = state.tiebreak ? ' | TIEBREAK' : '';
+  const side = net.mySide();
+  const role = net.myRole();
+  const you = side ? ` | you are ${side}${role ? ` · ${role}` : ''}` : '';
   const head =
     `${state.phase} | ${score} | innings ${String(state.inningsIndex + 1)} | ` +
     `outs ${String(state.outs)} | batter: ${characterName(state.currentBatterId)}` +
-    `${tiebreak}${winner}`;
-  const tail = [lastPlay && `last: ${lastPlay}`, localAction, HELP].filter(Boolean).join(' — ');
+    `${tiebreak}${winner}${you}`;
+  const paused = state.paused === true ? 'opponent disconnected — waiting for reconnect' : '';
+  const tail = [paused, lastPlay && `last: ${lastPlay}`, localAction, HELP].filter(Boolean).join(' — ');
   return `${head}\n${tail}`;
 }
 
-connect()
-  .then((net) => {
-    let lastPlay = '';
-    let localAction = '';
-    const refresh = () => {
-      status.textContent = statusLine(net.room.state, lastPlay, localAction);
-    };
-    status.textContent = `connected — ${HELP}`;
-    attachInput(net, (text) => {
-      localAction = text;
-      refresh();
-    });
-    net.onPlayOutcome((resolution) => {
-      lastPlay = describeResolution(resolution);
-      refresh();
-    });
-    net.onRejected((rejection) => {
-      localAction = `rejected ${rejection.message} (${rejection.phase}): ${rejection.reason}`;
-      refresh();
-    });
-    net.room.onStateChange((state) => {
-      ball.update(state.ball.x, state.ball.y, state.ball.z, state.ballLive);
-      fielders.update(state.fielders.values());
-      runners.update(state.runners.values());
-      refresh();
-    });
-  })
-  .catch((error: unknown) => {
-    status.textContent = `connection failed: ${String(error)} — is the server running?`;
+function showLobbySetup(): void {
+  lobby.hidden = false;
+  lobbySetup.style.display = '';
+  lobbyWaiting.style.display = 'none';
+  createButton.disabled = false;
+  joinButton.disabled = false;
+}
+
+function showLobbyWaiting(code: string): void {
+  lobbySetup.style.display = 'none';
+  lobbyWaiting.style.display = 'block';
+  lobbyCode.textContent = code;
+}
+
+function hideLobby(): void {
+  lobby.hidden = true;
+}
+
+function runMatch(net: Net): void {
+  hideLobby();
+  let lastPlay = '';
+  let localAction = '';
+  const refresh = () => {
+    status.textContent = statusLine(net, net.room.state, lastPlay, localAction);
+  };
+  status.textContent = `connected — ${HELP}`;
+  attachInput(net, (text) => {
+    localAction = text;
+    refresh();
   });
+  net.onPlayOutcome((resolution) => {
+    lastPlay = describeResolution(resolution);
+    refresh();
+  });
+  net.onRejected((rejection) => {
+    localAction = `rejected ${rejection.message} (${rejection.phase}): ${rejection.reason}`;
+    refresh();
+  });
+  net.onOpponentLeft((side) => {
+    status.textContent = `opponent left — match over (side ${side})`;
+  });
+  net.room.onStateChange((state) => {
+    ball.update(state.ball.x, state.ball.y, state.ball.z, state.ballLive);
+    fielders.update(state.fielders.values());
+    runners.update(state.runners.values());
+    if (state.phase !== 'LOBBY') hideLobby();
+    refresh();
+  });
+}
+
+async function startCreate(): Promise<void> {
+  createButton.disabled = true;
+  joinButton.disabled = true;
+  lobbyError.textContent = '';
+  try {
+    const net = await connect({ mode: 'create' });
+    showLobbyWaiting(net.room.state.roomCode);
+    net.room.onStateChange((state) => {
+      if (state.phase !== 'LOBBY') hideLobby();
+    });
+    runMatch(net);
+  } catch (error: unknown) {
+    lobbyError.textContent = `could not create match: ${String(error)}`;
+    createButton.disabled = false;
+    joinButton.disabled = false;
+  }
+}
+
+async function startJoin(): Promise<void> {
+  const code = joinCodeInput.value.trim().toUpperCase();
+  if (!/^[A-Z]{4}$/.test(code)) {
+    lobbyError.textContent = 'enter the 4-letter code';
+    return;
+  }
+  createButton.disabled = true;
+  joinButton.disabled = true;
+  lobbyError.textContent = '';
+  try {
+    const net = await connect({ mode: 'join', code });
+    runMatch(net);
+  } catch (error: unknown) {
+    lobbyError.textContent = `could not join match: ${String(error)}`;
+    createButton.disabled = false;
+    joinButton.disabled = false;
+  }
+}
+
+createButton.addEventListener('click', () => {
+  void startCreate();
+});
+joinButton.addEventListener('click', () => {
+  void startJoin();
+});
+joinCodeInput.addEventListener('input', () => {
+  joinCodeInput.value = joinCodeInput.value.toUpperCase().slice(0, 4);
+});
+joinCodeInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') void startJoin();
+});
+
+showLobbySetup();
+status.textContent = `${HELP}`;

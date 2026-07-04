@@ -8,11 +8,104 @@
       html, body { margin: 0; height: 100%; overflow: hidden; }
       #app { width: 100%; height: 100%; display: block; }
       #status { position: fixed; top: 8px; left: 8px; margin: 0; color: #f5f1e6; font: 14px monospace; }
+
+      /* --- Lobby: a scorer's card clipped to the field, not a floating modal card. --- */
+      #lobby {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(10, 12, 8, 0.55);
+        font-family: monospace;
+        color: #f5f1e6;
+      }
+      #lobby[hidden] { display: none; }
+      #lobby-card {
+        width: 22em;
+        max-width: 90vw;
+        border: 1px solid #f5f1e6;
+        padding: 1.25em 1.5em;
+        background: rgba(10, 12, 8, 0.35);
+      }
+      #lobby-card h1 {
+        margin: 0 0 0.15em;
+        font-size: 1em;
+        font-weight: normal;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        border-bottom: 1px solid #f5f1e6;
+        padding-bottom: 0.6em;
+      }
+      #lobby-card .rule { color: #a9a494; font-size: 0.8em; margin: 0.9em 0 0.4em; }
+      #lobby-actions { display: flex; flex-direction: column; gap: 0.9em; margin-top: 0.6em; }
+      .lobby-row { display: flex; gap: 0.5em; }
+      #lobby button {
+        font-family: monospace;
+        font-size: 0.85em;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #f5f1e6;
+        background: transparent;
+        border: 1px solid #f5f1e6;
+        padding: 0.5em 0.8em;
+        cursor: pointer;
+      }
+      #lobby button:hover { background: #f5f1e6; color: #14170f; }
+      #lobby button:disabled { opacity: 0.4; cursor: default; background: transparent; color: #f5f1e6; }
+      #join-code {
+        flex: 1;
+        font-family: monospace;
+        font-size: 1.1em;
+        letter-spacing: 0.35em;
+        text-align: center;
+        text-transform: uppercase;
+        color: #f5f1e6;
+        background: transparent;
+        border: 1px solid #a9a494;
+        padding: 0.4em;
+        width: 5em;
+      }
+      #join-code::placeholder { color: #6b6656; letter-spacing: 0.35em; }
+      #lobby-waiting { display: none; text-align: center; }
+      #lobby-waiting .code {
+        font-size: 2.2em;
+        letter-spacing: 0.4em;
+        margin: 0.3em 0 0.1em;
+      }
+      #lobby-waiting .hint { color: #a9a494; font-size: 0.8em; }
+      #lobby-error { color: #d98c6b; font-size: 0.8em; min-height: 1.2em; margin-top: 0.5em; }
     </style>
   </head>
   <body>
     <canvas id="app"></canvas>
     <pre id="status">connecting…</pre>
+
+    <div id="lobby">
+      <div id="lobby-card">
+        <h1>Carl Quest Sports — new match</h1>
+
+        <div id="lobby-setup">
+          <p class="rule">start a match and share the code, or join one</p>
+          <div id="lobby-actions">
+            <button id="lobby-create" type="button">Create match</button>
+            <div class="lobby-row">
+              <input id="join-code" type="text" maxlength="4" placeholder="CODE" autocomplete="off" />
+              <button id="lobby-join" type="button">Join</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="lobby-waiting">
+          <p class="rule">share this code with your opponent</p>
+          <div class="code" id="lobby-code">----</div>
+          <p class="hint">waiting for opponent…</p>
+        </div>
+
+        <p id="lobby-error"></p>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
