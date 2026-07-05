@@ -1,30 +1,38 @@
 /**
- * CharacterModels — procedural low-poly humanoid rigs for the roster (visual overhaul Task 1).
+ * CharacterModels — minimal-mascot rigs for the roster (readable-game overhaul, Task 3).
  *
- * THE NO-PILLS RULE: every figure is a limbed humanoid — head on a neck, distinct torso,
- * pelvis, two pivoted arms, two pivoted legs — never a single capsule. Proportions are
- * deliberately chunky (heads ~1.4× realistic, thick limbs) so silhouettes read from the
- * gameplay camera at ~25 m.
+ * GROUND-UP REWORK (replaces the limbed low-poly humanoid rigs): every figure is now ONE
+ * rounded body-head blob mesh (a lathe-revolved bean/egg profile — a single geometry, not a
+ * head+neck+torso+pelvis assembly) plus two FLOATING SPHERE HANDS beside it (no arms — a
+ * deliberate simplification the user asked for by name). There are NO LEGS: the mascot bobs
+ * and waddles to move (that motion is wired in Task 4; this file only builds the pose surface
+ * animation needs). Every character is skinned by a SELF-PAINTED canvas texture (deterministic
+ * HTML canvas drawing, no image assets, no rng) carrying the face, the kit colour + trim + a
+ * big painted squad number, and most personality "tells" — only ≤2 extra small meshes per
+ * character are used where paint genuinely can't sell a tell (a brim disc, a headband torus).
  *
- * Per-character look table (hand-tuned, stats-informed):
- * | id     | silhouette                                    | distinguishing look                          |
- * |--------|-----------------------------------------------|----------------------------------------------|
- * | carl   | tall, confident opener (1.88 m)               | captain's GOLD ARMBAND on the right arm      |
- * | kian   | wiry, narrow-shouldered (1.74 m)              | tweed FLAT CAP with a forward brim           |
- * | laurie | tall with visibly TOO-LONG ARMS (×1.40)       | blond quiff; hands hang near the knees       |
- * | josh   | lean sprinter (1.78 m)                        | oversized cream KEEPER'S GLOVES              |
- * | joel   | BARREL CHEST, wide shoulders, bald (1.76 m)   | ROLLED SLEEVES — bare arms with a cuff roll  |
- * | darcy  | perfectly symmetric average build (1.75 m)    | TWO trim-coloured WRISTBANDS; hair bun       |
- * | jonty  | SQUAT and WIDE (1.55 m, widest shoulders/H)   | white HEADBAND under a mop of curls          |
- * | robbie | heavy-set (1.72 m)                            | HUGE FOREARMS (×1.8) and BIG BOOTS (×1.6)    |
- * | joe    | short and SCRAWNY (1.30 m), twig limbs        | OVERSIZED baggy shirt hanging past the hips  |
- * | ricy   | tidy athletic all-rounder (1.80 m)            | neat kit: collar + trim WAISTBAND, no props  |
- * | whale  | rounded GIANT (3.10 m, ~2.5× bulk)            | blue-grey skin, comically SMALL ARMS (×0.45) |
+ * Per-character look table (hand-tuned, stats/ability-informed):
+ * | # | id     | blob shape                          | painted face personality      | tell (painted unless noted)          |
+ * |---|--------|--------------------------------------|--------------------------------|---------------------------------------|
+ * | 1 | carl   | tall, upright egg, broad shoulders   | confident half-smile, level brows | gold captain's armband stripe painted around the blob |
+ * | 2 | kian   | narrow, slightly forward-leaning egg | sly narrow-eyed smirk          | tweed flat-cap brim (EXTRA mesh disc) |
+ * | 3 | laurie | tall, slim, elongated bean           | wide alert eyes, keen grin      | blond quiff painted as a hairline flick + tuft (EXTRA small mesh) |
+ * | 4 | josh   | lean, athletic bean                 | sharp focused eyes, tight grin | cream keeper's gloves — HAND spheres painted/coloured, not the blob |
+ * | 5 | joel   | barrel-round, wide egg              | broad steady grin, thick brows | rolled-sleeve cuff rings painted at the hand cuffs |
+ * | 6 | darcy  | perfectly symmetric round egg       | calm even gaze, neutral mouth  | two trim wristband stripes painted around each hand |
+ * | 7 | jonty  | squat, very wide egg (flattened)    | stoic flat mouth, unmoving brows | white headband torus (EXTRA mesh) over painted curls |
+ * | 8 | robbie | heavy-set, thick egg                | firm set jaw, small determined eyes | oversized painted hand spheres (scaled up, not extra geometry) |
+ * | 9 | joe    | tiny, narrow bean                   | worried wide eyes, wobbly frown | oversized painted shirt collar/hem band near the top of the blob |
+ * | 10| ricy   | tidy, medium athletic egg            | easy relaxed grin, soft brows  | trim waistband stripe painted low on the blob |
+ * | 11| whale  | huge, near-spherical blob            | gentle half-closed eyes, soft smile | blue-grey skin tone (no extra geometry — paint + scale sell "gentle giant") |
  *
- * Facing convention: the figure faces +z (boot toes, cap brim and eyes all point +z);
- * callers rotate `group` to aim it. All dimensions are metres at field scale.
+ * Facing convention: the painted face sits on the +z hemisphere of the blob (eyes/brows/mouth
+ * all point +z); callers rotate `group` to aim it, matching the old rig's convention exactly.
+ * All dimensions are metres at field scale.
  *
- * Pure construction only — no per-frame logic (animation is wired in Task 3).
+ * Pure construction only — no per-frame logic (animation is wired in Task 4). `pose` is
+ * deliberately reduced to `{ body, leftHand, rightHand }` — Task 4 rebuilds RenderModule's
+ * consumer of the old `{leftArm,rightArm,leftLeg,rightLeg,torso}` surface against this.
  */
 import * as THREE from 'three';
 import type { Character } from '@carlquest/shared';
@@ -32,24 +40,25 @@ import type { Character } from '@carlquest/shared';
 export type KitId = 'A' | 'B' | 'neutral';
 
 /**
- * Kit shirt palettes (unslop pass): deep navy vs maroon with shared cream trim — a
- * deliberate club-cricket pairing that sits with the parchment/gold UI identity rather
- * than a saturated red-vs-blue arcade default. Neutral (pre-draft) is a warm kit-grey.
+ * Kit body palettes for the incoming BOLD ARCADE-POP UI: brighter, more saturated navy and
+ * maroon than the retired parchment-era pairing, still readably "team navy vs team maroon"
+ * against light arcade backgrounds. Shared bright cream trim. Neutral (pre-draft) is a
+ * warm mid-grey kit. Exported names/keys stable for Task 4 + the UI restyle.
  */
 export const KIT_COLOURS: Record<KitId, { shirt: number; trim: number }> = {
-  A: { shirt: 0x22345e, trim: 0xf1e6cc },
-  B: { shirt: 0x7a2231, trim: 0xf1e6cc },
-  neutral: { shirt: 0x9a958a, trim: 0xdcd6c8 },
+  A: { shirt: 0x1e4fd8, trim: 0xfff4d6 },
+  B: { shirt: 0xd83a3a, trim: 0xfff4d6 },
+  neutral: { shirt: 0x8a8f9a, trim: 0xe8e4d8 },
 };
 
 export interface CharacterModel {
   group: THREE.Group; // position/rotate THIS; internal parts are relative
   pose: {
-    leftArm: THREE.Group; // shoulder pivots — rotate about x to swing
-    rightArm: THREE.Group;
-    leftLeg: THREE.Group; // hip pivots
-    rightLeg: THREE.Group;
-    torso: THREE.Group; // lean/bob pivot at the hips (carries head + arms)
+    /** The whole blob — bob (position.y) and lean/waddle (rotation) pivot here. */
+    body: THREE.Group;
+    /** Floating hand spheres either side of the body — orbit/bob them for wind-up/carry. */
+    leftHand: THREE.Group;
+    rightHand: THREE.Group;
   };
   /** Feet ring for status cues; hidden by default. Set .visible and .material colour. */
   ring: THREE.Mesh;
@@ -61,205 +70,433 @@ export interface CharacterModel {
    * is currently batting.
    */
   bat: THREE.Mesh;
-  /** Approximate standing height in metres (whale ≈ 3.1, joe ≈ 1.3) — for camera/tests. */
+  /** Approximate standing height in metres (whale ≈ 3.1, joe ≈ 1.1) — for camera/tests. */
   height: number;
   /** Emissive traverse tint (out = red); null restores originals. */
   setTint(colour: number | null): void;
   dispose(): void;
 }
 
-type HairStyle = 'crop' | 'quiff' | 'bun' | 'bald' | 'curls';
-type Accessory =
-  | 'armband'
-  | 'flat-cap'
-  | 'gloves'
-  | 'rolled-sleeves'
-  | 'wristbands'
-  | 'headband'
-  | 'none';
+type FaceMood = 'confident' | 'sly' | 'keen' | 'focused' | 'steady' | 'calm' | 'stoic' | 'firm' | 'worried' | 'easy' | 'gentle';
 
 interface Visual {
   heightM: number;
-  /** Full shoulder width (m) — sets torso top radius and arm pivot spread. */
-  shoulderW: number;
-  /** Torso bottom (belly) radius (m) — girth. */
-  bellyR: number;
-  /** Base limb radius (m). */
-  limbR: number;
+  /** Blob half-width at its widest (m) — the lathe profile's max radius. */
+  widthR: number;
+  /** Blob depth scale relative to width (1 = round; <1 flattens front-to-back). */
+  depthScale: number;
+  /** Where along the height (0=bottom,1=top) the blob is widest — egg vs bean vs squat. */
+  bulgeAt: number;
+  /** Skin/base tone used for hands and any bare-paint patches. */
   skin: number;
-  hair: number;
-  hairStyle: HairStyle;
-  accessory: Accessory;
-  /** Arm LENGTH multiplier (laurie 1.4 long; whale 0.45 tiny flipper-ish arms). */
-  armScale?: number;
-  /** Forearm RADIUS multiplier (robbie's heavy forearms). */
-  forearmScale?: number;
-  /** Boot size multiplier (robbie's big boots). */
-  bootScale?: number;
-  /** Torso radius multiplier for a baggy shirt hanging over a small frame (joe). */
-  shirtOversize?: number;
-  /** Whale: rounded sphere torso instead of the tapered cylinder. */
-  rounded?: boolean;
-  /** Ricy: tidy-kit trim waistband. */
-  waistband?: boolean;
+  /** Face paint mood. */
+  mood: FaceMood;
+  /** Squad number, painted large on the blob's kit panel (stable, roster order 1–11). */
+  number: number;
+  /** Hand sphere radius as a fraction of widthR (robbie's big mitts, joe's tiny hands). */
+  handScale: number;
+  /** Hand colour override (josh's cream gloves); defaults to skin. */
+  handColour?: number;
+  /** Painted hair colour + simple style flag for the canvas painter. */
+  hairColour?: number;
+  hairStyle?: 'flick' | 'curls' | 'none';
+  /** Extra small meshes (kept to ≤2 per character): flat-cap brim, headband torus. */
+  extra?: 'cap-brim' | 'headband' | 'quiff-tuft';
 }
 
-// Skin/hair palette (varied across the roster; the whale is a whale — blue-grey).
+// ---- Palette --------------------------------------------------------------------------
 const SKIN_LIGHT = 0xf1c9a5;
 const SKIN_TAN = 0xe0ac7e;
 const SKIN_MEDIUM = 0xc68642;
 const SKIN_BROWN = 0x8d5524;
-const SKIN_WHALE = 0x7d93a8;
+const SKIN_WHALE = 0x8fa6ba; // friendly blue-grey
 const HAIR_DARK_BROWN = 0x3b2b1b;
 const HAIR_BLACK = 0x1c1a17;
-const HAIR_BLOND = 0xcfa64e;
-const HAIR_GINGER = 0xa14e2a;
-const HAIR_MOUSY = 0x7a6a4f;
+const HAIR_BLOND = 0xe0c15a;
+const HAIR_GINGER = 0xc0602f;
 
-// Fixed prop colours.
-const SHORTS_COLOUR = 0x2e2e38; // shared dark PE-shorts slate for both kits
-const BOOT_COLOUR = 0x2a2119;
-const GLOVE_COLOUR = 0xf2ead8;
-const CAP_COLOUR = 0x6b5a3e; // kian's tweed
-const ARMBAND_COLOUR = 0xd9a441; // captain's gold, matching the UI gold identity
+const BALL_COLOUR = 0xe8483f;
+const RING_COLOUR = 0xd9a441; // default; RenderModule recolours per status
+const CAP_COLOUR = 0x6b5a3e;
 const HEADBAND_COLOUR = 0xf5f2e8;
-const BALL_COLOUR = 0xe8483f; // matches the scene ball
-const RING_COLOUR = 0xd9a441; // default; Task 3 recolours per status
-const EYE_COLOUR = 0x14110d;
-const BAT_BARREL_COLOUR = 0xd7b26a; // pale willow wood
-const BAT_HANDLE_COLOUR = 0x5a4326; // darker taped handle
+const BAT_BARREL_COLOUR = 0xd7b26a;
+const BAT_HANDLE_COLOUR = 0x5a4326;
 
 const DEFAULT_VISUAL: Visual = {
-  heightM: 1.7,
-  shoulderW: 0.55,
-  bellyR: 0.22,
-  limbR: 0.075,
+  heightM: 1.6,
+  widthR: 0.42,
+  depthScale: 0.85,
+  bulgeAt: 0.35,
   skin: SKIN_LIGHT,
-  hair: HAIR_DARK_BROWN,
-  hairStyle: 'crop',
-  accessory: 'none',
+  mood: 'easy',
+  number: 0,
+  handScale: 0.32,
+  hairStyle: 'none',
 };
 
-/** One entry per roster character (design spec §1); unknown ids fall back to DEFAULT_VISUAL. */
+/** One entry per roster character (design spec §1), roster order fixes the painted number. */
 const VISUALS: Record<string, Visual> = {
   carl: {
-    heightM: 1.88,
-    shoulderW: 0.62,
-    bellyR: 0.26,
-    limbR: 0.085,
+    heightM: 1.7,
+    widthR: 0.46,
+    depthScale: 0.9,
+    bulgeAt: 0.32,
     skin: SKIN_LIGHT,
-    hair: HAIR_DARK_BROWN,
-    hairStyle: 'crop',
-    accessory: 'armband',
+    mood: 'confident',
+    number: 1,
+    handScale: 0.3,
+    hairColour: HAIR_DARK_BROWN,
+    hairStyle: 'flick',
   },
   kian: {
-    heightM: 1.74,
-    shoulderW: 0.52,
-    bellyR: 0.2,
-    limbR: 0.065,
+    heightM: 1.55,
+    widthR: 0.36,
+    depthScale: 0.82,
+    bulgeAt: 0.4,
     skin: SKIN_LIGHT,
-    hair: HAIR_DARK_BROWN,
-    hairStyle: 'crop',
-    accessory: 'flat-cap',
+    mood: 'sly',
+    number: 2,
+    handScale: 0.27,
+    hairColour: HAIR_DARK_BROWN,
+    hairStyle: 'none',
+    extra: 'cap-brim',
   },
   laurie: {
-    heightM: 1.86,
-    shoulderW: 0.56,
-    bellyR: 0.22,
-    limbR: 0.075,
+    heightM: 1.85,
+    widthR: 0.34,
+    depthScale: 0.8,
+    bulgeAt: 0.3,
     skin: SKIN_TAN,
-    hair: HAIR_BLOND,
-    hairStyle: 'quiff',
-    accessory: 'none',
-    armScale: 1.4,
+    mood: 'keen',
+    number: 3,
+    handScale: 0.28,
+    hairColour: HAIR_BLOND,
+    hairStyle: 'flick',
+    extra: 'quiff-tuft',
   },
   josh: {
-    heightM: 1.78,
-    shoulderW: 0.54,
-    bellyR: 0.19,
-    limbR: 0.07,
+    heightM: 1.65,
+    widthR: 0.38,
+    depthScale: 0.85,
+    bulgeAt: 0.34,
     skin: SKIN_MEDIUM,
-    hair: HAIR_BLACK,
-    hairStyle: 'crop',
-    accessory: 'gloves',
+    mood: 'focused',
+    number: 4,
+    handScale: 0.34,
+    handColour: 0xf2ead8,
+    hairColour: HAIR_BLACK,
+    hairStyle: 'flick',
   },
   joel: {
-    heightM: 1.76,
-    shoulderW: 0.7,
-    bellyR: 0.34,
-    limbR: 0.09,
+    heightM: 1.6,
+    widthR: 0.52,
+    depthScale: 0.95,
+    bulgeAt: 0.34,
     skin: SKIN_LIGHT,
-    hair: HAIR_DARK_BROWN,
-    hairStyle: 'bald',
-    accessory: 'rolled-sleeves',
+    mood: 'steady',
+    number: 5,
+    handScale: 0.31,
+    hairStyle: 'none',
   },
   darcy: {
-    heightM: 1.75,
-    shoulderW: 0.56,
-    bellyR: 0.23,
-    limbR: 0.075,
+    heightM: 1.62,
+    widthR: 0.42,
+    depthScale: 0.88,
+    bulgeAt: 0.36,
     skin: SKIN_TAN,
-    hair: HAIR_DARK_BROWN,
-    hairStyle: 'bun',
-    accessory: 'wristbands',
+    mood: 'calm',
+    number: 6,
+    handScale: 0.29,
+    hairColour: HAIR_DARK_BROWN,
+    hairStyle: 'curls',
   },
   jonty: {
-    heightM: 1.55,
-    shoulderW: 0.72,
-    bellyR: 0.32,
-    limbR: 0.095,
+    heightM: 1.3,
+    widthR: 0.56,
+    depthScale: 1.0,
+    bulgeAt: 0.42,
     skin: SKIN_BROWN,
-    hair: HAIR_BLACK,
+    mood: 'stoic',
+    number: 7,
+    handScale: 0.33,
+    hairColour: HAIR_BLACK,
     hairStyle: 'curls',
-    accessory: 'headband',
+    extra: 'headband',
   },
   robbie: {
-    heightM: 1.72,
-    shoulderW: 0.6,
-    bellyR: 0.28,
-    limbR: 0.08,
+    heightM: 1.58,
+    widthR: 0.48,
+    depthScale: 0.92,
+    bulgeAt: 0.35,
     skin: SKIN_LIGHT,
-    hair: HAIR_GINGER,
-    hairStyle: 'crop',
-    accessory: 'none',
-    forearmScale: 1.8,
-    bootScale: 1.6,
+    mood: 'firm',
+    number: 8,
+    handScale: 0.42,
+    hairColour: HAIR_GINGER,
+    hairStyle: 'flick',
   },
   joe: {
-    heightM: 1.3,
-    shoulderW: 0.4,
-    bellyR: 0.15,
-    limbR: 0.05,
+    heightM: 1.1,
+    widthR: 0.26,
+    depthScale: 0.78,
+    bulgeAt: 0.3,
     skin: SKIN_LIGHT,
-    hair: HAIR_MOUSY,
+    mood: 'worried',
+    number: 9,
+    handScale: 0.24,
+    hairColour: 0x7a6a4f,
     hairStyle: 'curls',
-    accessory: 'none',
-    shirtOversize: 1.55,
   },
   ricy: {
-    heightM: 1.8,
-    shoulderW: 0.58,
-    bellyR: 0.21,
-    limbR: 0.075,
+    heightM: 1.68,
+    widthR: 0.4,
+    depthScale: 0.86,
+    bulgeAt: 0.33,
     skin: SKIN_MEDIUM,
-    hair: HAIR_BLACK,
-    hairStyle: 'crop',
-    accessory: 'none',
-    waistband: true,
+    mood: 'easy',
+    number: 10,
+    handScale: 0.3,
+    hairColour: HAIR_BLACK,
+    hairStyle: 'flick',
   },
   whale: {
-    heightM: 3.1,
-    shoulderW: 1.6,
-    bellyR: 0.8,
-    limbR: 0.15,
+    heightM: 3.0,
+    widthR: 1.15,
+    depthScale: 1.0,
+    bulgeAt: 0.4,
     skin: SKIN_WHALE,
-    hair: HAIR_BLACK,
-    hairStyle: 'bald',
-    accessory: 'none',
-    armScale: 0.45,
-    rounded: true,
+    mood: 'gentle',
+    number: 11,
+    handScale: 0.24,
+    hairStyle: 'none',
   },
 };
+
+// ---- Canvas face/kit painter -----------------------------------------------------------
+// One 512×512 canvas per character, wrapped around the lathe blob (u = around, v = up).
+// Layout (deterministic, no rng): a kit-colour band with a trim collar near the top, a big
+// painted number roundel on the chest-front, and the face (eyes/brows/mouth) painted higher
+// on the front band so it sits on the blob's upper "head" curvature.
+const TEX_SIZE = 512;
+
+function paintCharacterTexture(v: Visual, kit: { shirt: number; trim: number }): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = TEX_SIZE;
+  canvas.height = TEX_SIZE;
+  const ctx = canvas.getContext('2d');
+  if (ctx === null) throw new Error('CharacterModels: 2D canvas context unavailable');
+
+  const shirtCss = `#${kit.shirt.toString(16).padStart(6, '0')}`;
+  const trimCss = `#${kit.trim.toString(16).padStart(6, '0')}`;
+  const skinCss = `#${v.skin.toString(16).padStart(6, '0')}`;
+
+  // Base kit fill (the whole wrap is "shirt" colour by default; the face patch overpaints
+  // its own skin-coloured region on the front band).
+  ctx.fillStyle = shirtCss;
+  ctx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
+
+  // Trim collar band near the top of the profile (v is inverted in canvas y: v=1 top → y=0).
+  const collarY = TEX_SIZE * 0.06;
+  ctx.fillStyle = trimCss;
+  ctx.fillRect(0, collarY, TEX_SIZE, TEX_SIZE * 0.05);
+
+  // Waistband tell (ricy): a trim stripe low on the body.
+  if (v.number === 10) {
+    ctx.fillStyle = trimCss;
+    ctx.fillRect(0, TEX_SIZE * 0.78, TEX_SIZE, TEX_SIZE * 0.045);
+  }
+  // Captain's armband tell (carl): a gold stripe wrapping the lower band, clear of the
+  // number roundel painted later (roundel spans ≈0.47–0.69 normalised — the stripe sits
+  // below it so the two tells stay visually distinct rather than merging).
+  if (v.number === 1) {
+    ctx.fillStyle = '#d9a441';
+    ctx.fillRect(0, TEX_SIZE * 0.72, TEX_SIZE, TEX_SIZE * 0.05);
+  }
+  // Wristband tells (darcy): two narrow trim stripes lower down, also clear of the roundel
+  // (read as painted "hand" bands since darcy's hand spheres share this same body texture
+  // via a simplified UV, painted here as extra low stripes for a consistent silhouette).
+  if (v.number === 6) {
+    ctx.fillStyle = trimCss;
+    ctx.fillRect(0, TEX_SIZE * 0.72, TEX_SIZE, TEX_SIZE * 0.03);
+    ctx.fillRect(0, TEX_SIZE * 0.79, TEX_SIZE, TEX_SIZE * 0.03);
+  }
+  // Rolled-sleeve cuff tell (joel): two shirt-toned ring bands near the shoulders.
+  if (v.number === 5) {
+    ctx.fillStyle = trimCss;
+    ctx.fillRect(0, TEX_SIZE * 0.16, TEX_SIZE, TEX_SIZE * 0.03);
+  }
+  // Oversized shirt collar/hem tell (joe): a wide trim hem low on the tiny frame.
+  if (v.number === 9) {
+    ctx.fillStyle = trimCss;
+    ctx.fillRect(0, TEX_SIZE * 0.82, TEX_SIZE, TEX_SIZE * 0.08);
+  }
+
+  // ---- Face patch: a skin-coloured rounded panel on the front band (centred u, upper v) ----
+  const faceCx = TEX_SIZE * 0.5;
+  const faceCy = TEX_SIZE * 0.28;
+  const faceW = TEX_SIZE * 0.34;
+  const faceH = TEX_SIZE * 0.26;
+  ctx.fillStyle = skinCss;
+  ctx.beginPath();
+  ctx.ellipse(faceCx, faceCy, faceW / 2, faceH / 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Painted hairline (flick/curls) sitting just above the face patch.
+  if (v.hairStyle === 'flick' && v.hairColour !== undefined) {
+    ctx.fillStyle = `#${v.hairColour.toString(16).padStart(6, '0')}`;
+    ctx.beginPath();
+    ctx.ellipse(faceCx, faceCy - faceH * 0.42, faceW * 0.56, faceH * 0.32, 0, Math.PI, 0);
+    ctx.fill();
+  }
+  if (v.hairStyle === 'curls' && v.hairColour !== undefined) {
+    ctx.fillStyle = `#${v.hairColour.toString(16).padStart(6, '0')}`;
+    for (const dx of [-0.32, 0, 0.32]) {
+      ctx.beginPath();
+      ctx.arc(faceCx + dx * faceW, faceCy - faceH * 0.4, faceW * 0.16, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ---- Eyes/brows/mouth painted per mood ----
+  const eyeY = faceCy - faceH * 0.03;
+  const eyeDx = faceW * 0.19;
+  const eyeR = faceW * 0.05;
+  ctx.fillStyle = '#14110d';
+
+  const drawEyes = (openness: number, browAngle: number): void => {
+    for (const side of [-1, 1]) {
+      const ex = faceCx + side * eyeDx;
+      ctx.beginPath();
+      ctx.ellipse(ex, eyeY, eyeR, eyeR * openness, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Brow: a short angled stroke above each eye.
+      ctx.save();
+      ctx.strokeStyle = '#14110d';
+      ctx.lineWidth = faceW * 0.02;
+      ctx.beginPath();
+      ctx.translate(ex, eyeY - eyeR * 3);
+      ctx.rotate(side * browAngle);
+      ctx.moveTo(-faceW * 0.08, 0);
+      ctx.lineTo(faceW * 0.08, 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  const drawMouth = (kind: 'smile' | 'smirk' | 'flat' | 'frown' | 'grin'): void => {
+    const my = faceCy + faceH * 0.28;
+    ctx.strokeStyle = '#14110d';
+    ctx.lineWidth = faceW * 0.025;
+    ctx.beginPath();
+    if (kind === 'smile' || kind === 'grin') {
+      ctx.arc(faceCx, my - faceH * 0.05, faceW * 0.16, 0.15 * Math.PI, 0.85 * Math.PI);
+    } else if (kind === 'smirk') {
+      ctx.moveTo(faceCx - faceW * 0.14, my);
+      ctx.quadraticCurveTo(faceCx + faceW * 0.02, my + faceH * 0.03, faceCx + faceW * 0.16, my - faceH * 0.06);
+    } else if (kind === 'flat') {
+      ctx.moveTo(faceCx - faceW * 0.15, my);
+      ctx.lineTo(faceCx + faceW * 0.15, my);
+    } else {
+      ctx.arc(faceCx, my + faceH * 0.14, faceW * 0.15, 1.15 * Math.PI, 1.85 * Math.PI);
+    }
+    ctx.stroke();
+  };
+
+  switch (v.mood) {
+    case 'confident':
+      drawEyes(1, 0.05);
+      drawMouth('smile');
+      break;
+    case 'sly':
+      drawEyes(0.55, 0.18);
+      drawMouth('smirk');
+      break;
+    case 'keen':
+      drawEyes(1.25, -0.05);
+      drawMouth('grin');
+      break;
+    case 'focused':
+      drawEyes(0.75, 0.0);
+      drawMouth('flat');
+      break;
+    case 'steady':
+      drawEyes(1, 0.02);
+      drawMouth('smile');
+      break;
+    case 'calm':
+      drawEyes(0.85, 0);
+      drawMouth('flat');
+      break;
+    case 'stoic':
+      drawEyes(0.9, 0);
+      drawMouth('flat');
+      break;
+    case 'firm':
+      drawEyes(0.7, 0.12);
+      drawMouth('flat');
+      break;
+    case 'worried':
+      drawEyes(1.35, -0.22);
+      drawMouth('frown');
+      break;
+    case 'easy':
+      drawEyes(1, -0.03);
+      drawMouth('smile');
+      break;
+    case 'gentle':
+      drawEyes(0.5, -0.08);
+      drawMouth('smile');
+      break;
+  }
+
+  // ---- Big painted squad number roundel, lower on the chest-front ----
+  const numCx = TEX_SIZE * 0.5;
+  const numCy = TEX_SIZE * 0.58;
+  const numR = TEX_SIZE * 0.11;
+  ctx.fillStyle = trimCss;
+  ctx.beginPath();
+  ctx.arc(numCx, numCy, numR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = shirtCss;
+  const numText = String(v.number);
+  // Double-digit numbers (10, 11) need a smaller point size to stay inside the roundel —
+  // a single fixed size overflows for two characters at the one-digit fit.
+  const fontScale = numText.length > 1 ? 1.05 : 1.5;
+  ctx.font = `700 ${Math.round(numR * fontScale)}px "Arial Black", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(numText, numCx, numCy + numR * 0.06);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * Paints a small square texture for a hand sphere: mostly the skin/glove colour with a
+ * subtle wristband stripe for darcy and robbie's oversize mitts read via handScale alone
+ * (no extra geometry needed — a plain flat-coloured material suffices there), so this
+ * painter is reserved for the one tell that genuinely needs a stripe on the hand itself.
+ */
+function paintHandTexture(colour: number, stripeColour: number | null): THREE.CanvasTexture {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (ctx === null) throw new Error('CharacterModels: 2D canvas context unavailable');
+  ctx.fillStyle = `#${colour.toString(16).padStart(6, '0')}`;
+  ctx.fillRect(0, 0, size, size);
+  if (stripeColour !== null) {
+    ctx.fillStyle = `#${stripeColour.toString(16).padStart(6, '0')}`;
+    ctx.fillRect(0, size * 0.4, size, size * 0.2);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
 
 export function buildCharacterModel(character: Character, kit: KitId): CharacterModel {
   const v = VISUALS[character.id] ?? DEFAULT_VISUAL;
@@ -268,18 +505,8 @@ export function buildCharacterModel(character: Character, kit: KitId): Character
   // Per-model resource registers so dispose() can release everything this build created.
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
-  // Per-model material cache keyed by colour — per-MODEL instances are required so that
-  // setTint on one figure never bleeds emissive onto another figure's shared material.
-  const matCache = new Map<number, THREE.MeshLambertMaterial>();
-  const mat = (colour: number): THREE.MeshLambertMaterial => {
-    let m = matCache.get(colour);
-    if (m === undefined) {
-      m = new THREE.MeshLambertMaterial({ color: colour });
-      matCache.set(colour, m);
-      materials.push(m);
-    }
-    return m;
-  };
+  const textures: THREE.Texture[] = [];
+
   /** Registers the geometry and builds a mesh; noTint parts are skipped by setTint. */
   const part = (
     geometry: THREE.BufferGeometry,
@@ -292,269 +519,138 @@ export function buildCharacterModel(character: Character, kit: KitId): Character
     return m;
   };
 
-  // ---- Derived skeleton dimensions (all fractions of total height H, ground = y 0) ----
-  // Vertical budget: boots+legs to the hip 0.42H, torso 0.33H, neck 0.02H, head 2×headR
-  // (headR ≈ 0.115H, ~1.4× realistic for low-poly chunk) → 0.42+0.33+0.02+0.23 ≈ 1.00H.
-  const H = v.heightM;
-  const hipY = 0.42 * H; // hip pivot height — legs hang exactly hipY down to the ground
-  const torsoH = 0.33 * H;
-  const neckH = 0.02 * H;
-  const headR = H * (v.rounded ? 0.095 : 0.115); // the whale's head is relatively small
-  const bootH = 0.05 * H;
-  const armScale = v.armScale ?? 1;
-  const forearmScale = v.forearmScale ?? 1;
-  const bootScale = v.bootScale ?? 1;
-  const oversize = v.shirtOversize ?? 1;
-  const armLen = 0.4 * H * armScale; // shoulder→wrist; 1.4× puts laurie's hands near his knees
-  const upperArmLen = armLen * 0.55;
-  const lowerArmLen = armLen * 0.45;
-  const handR = v.limbR * (v.accessory === 'gloves' ? 2.1 : 1.25); // gloves = oversized mitts
-
   const group = new THREE.Group();
 
-  // ---- Torso group: the lean/bob pivot sits AT THE HIPS (y = hipY), so rotating it
-  // about x leans the upper body forward while the legs stay planted. Head and arms
-  // are children of this group so a lean carries them naturally. ----
-  const torso = new THREE.Group();
-  torso.position.y = hipY;
-  group.add(torso);
-
-  const skinMat = mat(v.skin);
-  const shirtMat = mat(kitColours.shirt);
-  const trimMat = mat(kitColours.trim);
-
-  if (v.rounded === true) {
-    // The whale: a big rounded belly — a scaled SPHERE torso (still a torso on legs with
-    // arms and a head, emphatically not a full-figure pill).
-    const belly = part(new THREE.SphereGeometry(1, 14, 12), shirtMat);
-    belly.scale.set(v.shoulderW * 0.5, torsoH * 0.62, v.shoulderW * 0.4);
-    belly.position.y = torsoH * 0.5;
-    torso.add(belly);
-  } else {
-    // Tapered low-poly cylinder: shoulders (top radius) vs belly (bottom radius), squashed
-    // in z (×0.72) so the chest reads flat-fronted rather than tubular.
-    const topR = v.shoulderW * 0.42 * oversize;
-    const botR = Math.max(v.bellyR, topR * 0.75) * oversize;
-    const shirtH = torsoH * (oversize > 1 ? 1.15 : 1); // baggy shirt hangs past the hips
-    const chest = part(new THREE.CylinderGeometry(topR, botR, shirtH, 10), shirtMat);
-    chest.scale.z = 0.72;
-    // Centre the shirt so its TOP stays at the shoulder line (y = torsoH); any extra
-    // oversize length hangs downward over the pelvis.
-    chest.position.y = torsoH - shirtH / 2;
-    torso.add(chest);
-
-    // Collar (trim) at the neck base.
-    const collar = part(new THREE.CylinderGeometry(headR * 0.62, headR * 0.62, 0.03 * H, 10), trimMat);
-    collar.position.y = torsoH;
-    torso.add(collar);
-
-    if (v.waistband === true) {
-      // Ricy's tidy kit: a crisp trim waistband at the shirt hem.
-      const band = part(new THREE.CylinderGeometry(botR * 1.02, botR * 1.02, 0.035 * H, 10), trimMat);
-      band.scale.z = 0.72;
-      band.position.y = torsoH - shirtH + 0.02 * H;
-      torso.add(band);
+  // ---- The blob: a single LatheGeometry profile revolved 360° — an egg/bean silhouette
+  // whose widest point sits at `bulgeAt` of the height. This is the ONE main body-head
+  // mesh (no separate head/neck/torso/pelvis) per the user's minimal-mascot requirement. ----
+  const H = v.heightM;
+  const bulgeY = H * v.bulgeAt;
+  const profile: THREE.Vector2[] = [];
+  const steps = 16;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps; // 0 (ground) .. 1 (crown)
+    const y = t * H;
+    // A smooth taper both below and above the bulge point using a half-sine lobe on each
+    // side, so the silhouette reads as a rounded egg rather than a lathe-y vase.
+    let radius: number;
+    if (y <= bulgeY) {
+      const localT = bulgeY > 0 ? y / bulgeY : 0;
+      radius = v.widthR * Math.sin(localT * (Math.PI / 2));
+    } else {
+      const span = H - bulgeY;
+      const localT = span > 0 ? (y - bulgeY) / span : 0;
+      radius = v.widthR * Math.cos(localT * (Math.PI / 2));
     }
+    profile.push(new THREE.Vector2(Math.max(radius, 0.001), y));
+  }
+  // phiStart = π puts the UV seam (u=0/u=1) at phi=π i.e. (x=0, z=-widthR) — the BACK of
+  // the model — so u=0.5 (phi=0: x=0, z=+widthR) lands on the FRONT, exactly where the
+  // texture painter centres the face and number. Without this offset the seam (not the
+  // front) would sit at u=0.5 and the face would paint onto the model's back.
+  const blobGeometry = new THREE.LatheGeometry(profile, 20, Math.PI);
+  // LatheGeometry revolves the profile about y into a circular cross-section; scaling only
+  // z squashes that circle into an oval (front-to-back), giving a rounder face-on silhouette
+  // while `v.widthR` (the profile's own radius, unscaled) stays the true x-axis half-width
+  // used below for hand placement and the shadow/ring sizing.
+  blobGeometry.scale(1, 1, v.depthScale);
+  const texture = paintCharacterTexture(v, kitColours);
+  textures.push(texture);
+  const bodyMat = new THREE.MeshLambertMaterial({ map: texture });
+  materials.push(bodyMat);
+  const blob = part(blobGeometry, bodyMat);
+
+  const body = new THREE.Group();
+  body.add(blob);
+  group.add(body);
+
+  // ---- Extra tell meshes (kept to ≤2 per character; most tells are painted above) ----
+  if (v.extra === 'cap-brim') {
+    // Kian: a flattened tweed disc + short forward brim near the blob's crown.
+    const capMat = new THREE.MeshLambertMaterial({ color: CAP_COLOUR });
+    materials.push(capMat);
+    const crownY = H * 0.94;
+    const crown = part(new THREE.CylinderGeometry(v.widthR * 0.62, v.widthR * 0.62, H * 0.05, 12), capMat);
+    crown.position.y = crownY;
+    body.add(crown);
+    const brim = part(new THREE.BoxGeometry(v.widthR * 0.8, H * 0.02, v.widthR * 0.5), capMat);
+    brim.position.set(0, crownY - H * 0.015, v.widthR * 0.4);
+    body.add(brim);
+  }
+  if (v.extra === 'headband') {
+    // Jonty: a white headband torus around the upper blob, over the painted curls.
+    const bandMat = new THREE.MeshLambertMaterial({ color: HEADBAND_COLOUR });
+    materials.push(bandMat);
+    const band = part(new THREE.TorusGeometry(v.widthR * 0.78, H * 0.018, 8, 20), bandMat);
+    band.rotation.x = Math.PI / 2;
+    band.position.y = H * 0.78;
+    body.add(band);
+  }
+  if (v.extra === 'quiff-tuft') {
+    // Laurie: a single small tuft mesh flicking up from the blond hairline.
+    const tuftMat = new THREE.MeshLambertMaterial({ color: v.hairColour ?? HAIR_BLOND });
+    materials.push(tuftMat);
+    const tuft = part(new THREE.ConeGeometry(H * 0.035, H * 0.09, 8), tuftMat);
+    tuft.position.set(0, H * 0.97, v.widthR * 0.25);
+    tuft.rotation.x = -0.5;
+    body.add(tuft);
   }
 
-  // Pelvis block (shorts colour) — bridges torso and legs; child of the ROOT so it stays
-  // with the planted legs when the torso leans.
-  const pelvis = part(
-    new THREE.BoxGeometry(v.shoulderW * 0.5, 0.1 * H, v.shoulderW * 0.34),
-    mat(SHORTS_COLOUR),
-  );
-  pelvis.position.y = hipY - 0.02 * H;
-  group.add(pelvis);
+  // ---- Floating sphere hands: two spheres beside the body, NOT connected by arms. They
+  // are children of `body` (not `group`) so the body's bob/lean pivot carries them along
+  // naturally — a bobbing body with hands that stay statically in world space would read
+  // as broken, not "floating". They sit roughly at the blob's widest point height, offset
+  // outward in x, slightly forward in z so they read in front of the silhouette from the
+  // +z camera. Their OWN local position/rotation is still free for Task 4 to animate an
+  // independent orbit (wind-up) or carry pose on top of the inherited body motion. ----
+  const handY = bulgeY * 0.95;
+  const handOffsetX = v.widthR * v.depthScale + v.widthR * v.handScale * 0.9;
+  const handR = Math.max(v.widthR * v.handScale, 0.05);
+  const handBaseColour = v.handColour ?? v.skin;
+  const handStripeColour = v.number === 6 ? kitColours.trim : null; // darcy's wristband tell
+  const handTexture = paintHandTexture(handBaseColour, handStripeColour);
+  textures.push(handTexture);
+  const handMat = new THREE.MeshLambertMaterial({ map: handTexture });
+  materials.push(handMat);
 
-  // ---- Head (child of torso; local y measured from the hip pivot) ----
-  const headCentreY = torsoH + neckH + headR;
-  const neck = part(new THREE.CylinderGeometry(headR * 0.35, headR * 0.4, neckH * 2.5, 8), skinMat);
-  neck.position.y = torsoH + neckH;
-  torso.add(neck);
-  const head = part(new THREE.SphereGeometry(headR, 14, 12), skinMat);
-  head.position.y = headCentreY;
-  torso.add(head);
-  // Eyes — two dots on the +z face so the figure's facing reads at a glance.
-  for (const side of [-1, 1]) {
-    const eye = part(new THREE.SphereGeometry(headR * 0.09, 6, 6), mat(EYE_COLOUR));
-    eye.position.set(side * headR * 0.33, headCentreY + headR * 0.15, headR * 0.85);
-    torso.add(eye);
-  }
-
-  // Hair (simple cap geometry variants).
-  const hairMat = mat(v.hair);
-  if (v.hairStyle === 'crop' || v.hairStyle === 'quiff' || v.hairStyle === 'bun') {
-    const cap = part(new THREE.SphereGeometry(headR * 1.05, 12, 8), hairMat);
-    cap.scale.y = 0.55;
-    cap.position.y = headCentreY + headR * 0.35;
-    torso.add(cap);
-  }
-  if (v.hairStyle === 'quiff') {
-    const quiff = part(new THREE.BoxGeometry(headR * 0.8, headR * 0.4, headR * 0.6), hairMat);
-    quiff.position.set(0, headCentreY + headR * 0.85, headR * 0.45);
-    quiff.rotation.x = -0.35; // tipped up at the front
-    torso.add(quiff);
-  }
-  if (v.hairStyle === 'bun') {
-    const bun = part(new THREE.SphereGeometry(headR * 0.38, 8, 8), hairMat);
-    bun.position.set(0, headCentreY + headR * 0.5, -headR * 0.9);
-    torso.add(bun);
-  }
-  if (v.hairStyle === 'curls') {
-    const curlOffsets: ReadonlyArray<readonly [number, number]> = [
-      [-0.5, 0.15],
-      [0, -0.2],
-      [0.5, 0.15],
-    ];
-    for (const [cx, cz] of curlOffsets) {
-      const curl = part(new THREE.SphereGeometry(headR * 0.5, 8, 8), hairMat);
-      curl.position.set(cx * headR, headCentreY + headR * 0.6, cz * headR);
-      torso.add(curl);
-    }
-  }
-  if (v.accessory === 'flat-cap') {
-    // Kian: flattened tweed disc with a short forward brim.
-    const capMat = mat(CAP_COLOUR);
-    const crown = part(new THREE.CylinderGeometry(headR * 1.18, headR * 1.18, headR * 0.3, 12), capMat);
-    crown.position.y = headCentreY + headR * 0.75;
-    torso.add(crown);
-    const brim = part(new THREE.BoxGeometry(headR * 1.4, headR * 0.12, headR * 0.9), capMat);
-    brim.position.set(0, headCentreY + headR * 0.62, headR * 0.75);
-    torso.add(brim);
-  }
-  if (v.accessory === 'headband') {
-    // Jonty: band around the forehead, below the curls.
-    const band = part(
-      new THREE.CylinderGeometry(headR * 1.02, headR * 1.02, headR * 0.25, 12),
-      mat(HEADBAND_COLOUR),
-    );
-    band.position.y = headCentreY + headR * 0.25;
-    torso.add(band);
-  }
-
-  // ---- Arms: pivot groups AT the shoulders (children of torso; local y just below the
-  // shoulder line, x at the torso edge) so rotation.x swings the whole arm naturally.
-  // Limb meshes hang DOWNWARD from the pivot (negative local y). ----
-  const buildArm = (side: -1 | 1): THREE.Group => {
-    const arm = new THREE.Group();
-    arm.position.set(side * (v.shoulderW / 2 + v.limbR * 0.2), torsoH - v.limbR * 0.6, 0);
-    torso.add(arm);
-
-    // Deltoid cap in shirt colour rounds the shoulder joint.
-    const shoulder = part(new THREE.SphereGeometry(v.limbR * 1.5, 8, 8), shirtMat);
-    arm.add(shoulder);
-
-    const rolled = v.accessory === 'rolled-sleeves';
-    const sleeveLen = upperArmLen * (rolled ? 0.4 : 1);
-    const sleeve = part(new THREE.CylinderGeometry(v.limbR * 1.15, v.limbR * 1.15, sleeveLen, 8), shirtMat);
-    sleeve.position.y = -sleeveLen / 2;
-    arm.add(sleeve);
-    if (rolled) {
-      // Joel: a chunky cuff roll at the sleeve end, bare (skin) upper arm below it.
-      const cuff = part(new THREE.CylinderGeometry(v.limbR * 1.4, v.limbR * 1.4, 0.04 * H, 8), shirtMat);
-      cuff.position.y = -sleeveLen;
-      arm.add(cuff);
-      const bareLen = upperArmLen - sleeveLen;
-      const bare = part(new THREE.CylinderGeometry(v.limbR, v.limbR, bareLen, 8), skinMat);
-      bare.position.y = -(sleeveLen + bareLen / 2);
-      arm.add(bare);
-    }
-
-    const forearmR = v.limbR * 0.9 * forearmScale;
-    const forearm = part(new THREE.CylinderGeometry(forearmR, forearmR * 0.85, lowerArmLen, 8), skinMat);
-    forearm.position.y = -(upperArmLen + lowerArmLen / 2);
-    arm.add(forearm);
-
-    if (v.accessory === 'wristbands') {
-      // Darcy: matching trim bands on BOTH wrists (the SWITCH tell — perfectly symmetric).
-      const band = part(new THREE.CylinderGeometry(forearmR * 1.35, forearmR * 1.35, 0.03 * H, 8), trimMat);
-      band.position.y = -(upperArmLen + lowerArmLen * 0.82);
-      arm.add(band);
-    }
-    if (v.accessory === 'armband' && side === 1) {
-      // Carl: captain's gold armband on the RIGHT upper arm only.
-      const band = part(new THREE.CylinderGeometry(v.limbR * 1.35, v.limbR * 1.35, 0.03 * H, 8), mat(ARMBAND_COLOUR));
-      band.position.y = -upperArmLen * 0.45;
-      arm.add(band);
-    }
-
-    const hand = part(
-      new THREE.SphereGeometry(handR, 8, 8),
-      v.accessory === 'gloves' ? mat(GLOVE_COLOUR) : skinMat,
-    );
-    hand.position.y = -(upperArmLen + lowerArmLen + handR * 0.5);
-    arm.add(hand);
-    return arm;
+  const makeHand = (side: -1 | 1): THREE.Group => {
+    const hand = new THREE.Group();
+    hand.position.set(side * handOffsetX, handY, v.widthR * 0.15);
+    body.add(hand);
+    const sphere = part(new THREE.SphereGeometry(handR, 12, 10), handMat);
+    hand.add(sphere);
+    return hand;
   };
-  const rightArm = buildArm(1);
-  const leftArm = buildArm(-1);
+  const rightHand = makeHand(1);
+  const leftHand = makeHand(-1);
 
-  // In-hand ball prop — parented to the RIGHT arm just in front of the hand, so a cocked
-  // throwing-arm pose (Task 3) carries the ball with it. Hidden unless held.
-  const ball = part(new THREE.SphereGeometry(0.14, 10, 8), mat(BALL_COLOUR), true);
-  ball.position.set(0, -(upperArmLen + lowerArmLen + handR * 0.5), handR * 1.3);
+  // In-hand ball prop — parented to the RIGHT hand sphere, hidden unless held.
+  const ballMat = new THREE.MeshLambertMaterial({ color: BALL_COLOUR });
+  materials.push(ballMat);
+  const ball = part(new THREE.SphereGeometry(handR * 0.55, 10, 8), ballMat, true);
+  ball.position.set(0, 0, handR * 1.1);
   ball.visible = false;
-  rightArm.add(ball);
+  rightHand.add(ball);
 
-  // In-hand rounders bat — a simple tapered cylinder (barrel, the `bat` mesh itself) with
-  // a slim handle mesh as its child, hanging from the right hand pointing DOWN past the
-  // fingers at rest (the batter view, Task 4, rotates the whole rig into a raised stance).
-  // Hidden by default: fielders never carry it, and the batter view is the only caller
-  // that reveals it.
-  const batHandleLen = 0.28;
-  const batBarrelLen = 0.42;
-  const bat = part(
-    new THREE.CylinderGeometry(0.05, 0.022, batBarrelLen, 10),
-    mat(BAT_BARREL_COLOUR),
-    true,
-  );
-  bat.position.y = -(upperArmLen + lowerArmLen + handR * 0.5 + batHandleLen + batBarrelLen / 2);
+  // In-hand rounders bat — a tapered cylinder barrel with a slim handle child, hanging
+  // from the right hand pointing down at rest. Hidden by default; only the batter view
+  // reveals it (Task 4).
+  const batHandleLen = handR * 2.2;
+  const batBarrelLen = handR * 3.4;
+  const batMat = new THREE.MeshLambertMaterial({ color: BAT_BARREL_COLOUR });
+  materials.push(batMat);
+  const bat = part(new THREE.CylinderGeometry(handR * 0.4, handR * 0.18, batBarrelLen, 10), batMat, true);
+  bat.position.y = -(handR + batHandleLen + batBarrelLen / 2);
   bat.visible = false;
-  const batHandle = part(
-    new THREE.CylinderGeometry(0.018, 0.022, batHandleLen, 8),
-    mat(BAT_HANDLE_COLOUR),
-    true,
-  );
+  const handleMat = new THREE.MeshLambertMaterial({ color: BAT_HANDLE_COLOUR });
+  materials.push(handleMat);
+  const batHandle = part(new THREE.CylinderGeometry(handR * 0.15, handR * 0.18, batHandleLen, 8), handleMat, true);
   batHandle.position.y = batBarrelLen / 2 + batHandleLen / 2;
   bat.add(batHandle);
-  rightArm.add(bat);
-
-  // ---- Legs: pivot groups AT the hips (children of the ROOT group at y = hipY) so a
-  // torso lean does not move the legs. Total leg drop = hipY exactly, so boot soles land
-  // on y = 0: upper + lower cover (hipY − bootH) and the boot box fills the last bootH. ----
-  const hipX = v.shoulderW * 0.23;
-  const upperLegLen = (hipY - bootH) * 0.52;
-  const lowerLegLen = (hipY - bootH) * 0.48;
-  const buildLeg = (side: -1 | 1): THREE.Group => {
-    const leg = new THREE.Group();
-    leg.position.set(side * hipX, hipY, 0);
-    group.add(leg);
-
-    const thigh = part(
-      new THREE.CylinderGeometry(v.limbR * 1.25, v.limbR * 1.1, upperLegLen, 8),
-      mat(SHORTS_COLOUR),
-    );
-    thigh.position.y = -upperLegLen / 2;
-    leg.add(thigh);
-
-    const shin = part(new THREE.CylinderGeometry(v.limbR * 0.85, v.limbR * 0.75, lowerLegLen, 8), skinMat);
-    shin.position.y = -(upperLegLen + lowerLegLen / 2);
-    leg.add(shin);
-
-    const boot = part(
-      new THREE.BoxGeometry(v.limbR * 2.8 * bootScale, bootH, v.limbR * 4.4 * bootScale),
-      mat(BOOT_COLOUR),
-    );
-    // Boot centre sits bootH/2 above the ground; toes poke forward (+z).
-    boot.position.set(0, -(hipY - bootH / 2), v.limbR * 0.9);
-    leg.add(boot);
-    return leg;
-  };
-  const rightLeg = buildLeg(1);
-  const leftLeg = buildLeg(-1);
+  rightHand.add(bat);
 
   // ---- Ground furniture: blob shadow + status ring (both tint-excluded) ----
-  const shadowR = Math.max(v.shoulderW * 0.75, v.bellyR * 1.6, 0.35);
+  const shadowR = Math.max(v.widthR * 1.1, 0.3);
   const shadowMat = new THREE.MeshLambertMaterial({
     color: 0x000000,
     transparent: true,
@@ -563,7 +659,7 @@ export function buildCharacterModel(character: Character, kit: KitId): Character
   });
   materials.push(shadowMat);
   const shadow = part(new THREE.CircleGeometry(shadowR, 20), shadowMat, true);
-  shadow.rotation.x = -Math.PI / 2; // face up
+  shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.01;
   group.add(shadow);
 
@@ -571,7 +667,7 @@ export function buildCharacterModel(character: Character, kit: KitId): Character
   materials.push(ringMat);
   const ring = part(new THREE.RingGeometry(shadowR * 1.08, shadowR * 1.08 + 0.14, 24), ringMat, true);
   ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.02; // just above the shadow to avoid z-fighting
+  ring.position.y = 0.02;
   ring.visible = false;
   group.add(ring);
 
@@ -596,11 +692,12 @@ export function buildCharacterModel(character: Character, kit: KitId): Character
   const dispose = (): void => {
     for (const g of geometries) g.dispose();
     for (const m of materials) m.dispose();
+    for (const t of textures) t.dispose();
   };
 
   return {
     group,
-    pose: { leftArm, rightArm, leftLeg, rightLeg, torso },
+    pose: { body, leftHand, rightHand },
     ring,
     ball,
     bat,
