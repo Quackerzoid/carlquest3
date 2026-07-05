@@ -1,26 +1,44 @@
 import { CHARACTERS, type Character } from '@carlquest/shared';
 import type { MatchStateView, Net } from './NetModule';
 import type { SelectionStore } from './PositioningControls';
+import { ABILITY_TEXT, STAT_TEXT } from './Tooltips';
 
 export interface DraftScreen {
   /** Re-render from synced state; call on every onStateChange. Cheap (11 cards). */
   update(state: MatchStateView, mySide: 'A' | 'B' | null): void;
 }
 
-/** `spd 7 · rch 6 · pwr 8 · pit 5 · spn 5 · stm 7 · rfx 6 · ins 6 · nrv 8` */
-function statLine(c: Character): string {
+/** Ordered stat abbreviation → value pairs for a character (for the tipped stat line). */
+function statPairs(c: Character): readonly [string, number][] {
   const s = c.stats;
   return [
-    `spd ${String(s.speed)}`,
-    `rch ${String(s.reach)}`,
-    `pwr ${String(s.power)}`,
-    `pit ${String(s.pitch)}`,
-    `spn ${String(s.spin)}`,
-    `stm ${String(s.stamina)}`,
-    `rfx ${String(s.reflex)}`,
-    `ins ${String(s.instinct)}`,
-    `nrv ${String(s.nerve)}`,
-  ].join(' · ');
+    ['spd', s.speed],
+    ['rch', s.reach],
+    ['pwr', s.power],
+    ['pit', s.pitch],
+    ['spn', s.spin],
+    ['stm', s.stamina],
+    ['rfx', s.reflex],
+    ['ins', s.instinct],
+    ['nrv', s.nerve],
+  ];
+}
+
+/**
+ * Builds the tipped stat-line DOM: each abbreviation is a `.tip` span carrying a
+ * hover tooltip that spells out the stat in full. `· ` separators between them.
+ */
+function fillStatsElement(target: HTMLElement, c: Character): void {
+  const pairs = statPairs(c);
+  pairs.forEach(([abbr, value], i) => {
+    if (i > 0) target.append(' · ');
+    const span = document.createElement('span');
+    span.className = 'tip';
+    span.textContent = `${abbr} ${String(value)}`;
+    span.dataset['tipTitle'] = abbr.toUpperCase();
+    span.dataset['tip'] = STAT_TEXT[abbr] ?? abbr;
+    target.appendChild(span);
+  });
 }
 
 type Mode = 'none' | 'draft' | 'fielding' | 'batting';
@@ -31,14 +49,13 @@ function characterName(id: string): string {
   return CHARACTER_BY_ID.get(id)?.name ?? id;
 }
 
-/** Stat line for a roster id; falls back to an em dash if the id is unknown (defensive — server-driven). */
-function statLineForId(id: string): string {
-  const character = CHARACTER_BY_ID.get(id);
-  return character ? statLine(character) : '—';
-}
-
-/** Builds one clickable sheet row; caller fills in stats/badge text and listens via delegation. */
-function buildRow(id: string, statsText: string): HTMLButtonElement {
+/**
+ * Builds one clickable sheet row. Stats render as tipped abbreviation spans; when
+ * `showAbility` is set the row gets an ability chip (its own hover tooltip). The
+ * caller fills the badge text and (optionally) a `data-tip` action hint on the row,
+ * then listens via delegation on the list.
+ */
+function buildRow(id: string, showAbility: boolean): HTMLButtonElement {
   const row = document.createElement('button');
   row.type = 'button';
   row.className = 'draft-row';
@@ -50,12 +67,24 @@ function buildRow(id: string, statsText: string): HTMLButtonElement {
 
   const stats = document.createElement('span');
   stats.className = 'draft-row-stats';
-  stats.textContent = statsText;
+  const character = CHARACTER_BY_ID.get(id);
+  if (character) fillStatsElement(stats, character);
+  else stats.textContent = '—';
 
   const badge = document.createElement('span');
   badge.className = 'draft-row-badge';
 
   row.append(name, stats, badge);
+
+  if (showAbility && character) {
+    const ability = document.createElement('span');
+    ability.className = 'draft-row-ability draft-row-wide';
+    ability.textContent = character.ability.replaceAll('_', ' ').toLowerCase();
+    ability.dataset['tipTitle'] = character.ability.replaceAll('_', ' ');
+    ability.dataset['tip'] = ABILITY_TEXT[character.ability];
+    row.appendChild(ability);
+  }
+
   return row;
 }
 
@@ -166,16 +195,18 @@ export function createDraftScreen(
           : `draft — waiting on ${state.draftTurn || '—'}`;
         list.innerHTML = '';
         for (const character of CHARACTERS) {
-          const row = buildRow(
-            character.id,
-            `${statLine(character)}  [${character.ability.toLowerCase()}]`,
-          );
+          const row = buildRow(character.id, true);
           const badge = row.querySelector<HTMLSpanElement>('.draft-row-badge');
           const takenByA = squadAIds.includes(character.id);
           const takenByB = squadBIds.includes(character.id);
           const remaining = draftRemaining.includes(character.id);
           row.disabled = !myTurn || !remaining;
           row.classList.toggle('is-taken', takenByA || takenByB);
+          row.classList.toggle('is-team-a', takenByA);
+          row.classList.toggle('is-team-b', takenByB);
+          if (!takenByA && !takenByB && myTurn) {
+            row.dataset['tip'] = `Draft ${character.name} onto your squad.`;
+          }
           if (badge) badge.textContent = takenByA ? '[A]' : takenByB ? '[B]' : '';
           list.appendChild(row);
         }
@@ -191,8 +222,10 @@ export function createDraftScreen(
         heading.textContent = `positioning — subs used: ${String(subsUsed)}`;
         list.innerHTML = '';
 
+        const teamClass = mySide === 'A' ? 'is-team-a' : 'is-team-b';
         for (const id of onField) {
-          const row = buildRow(id, statLineForId(id));
+          const row = buildRow(id, false);
+          row.classList.add(teamClass);
           const badge = row.querySelector<HTMLSpanElement>('.draft-row-badge');
           const isBowler = state.currentPitcherId === id;
           const isSelected = selection.get() === id;
@@ -200,6 +233,11 @@ export function createDraftScreen(
           row.disabled = isBowler;
           row.classList.toggle('is-taken', isBowler);
           row.classList.toggle('is-selected', isSelected);
+          row.dataset['tip'] = isBowler
+            ? `${characterName(id)} is bowling. Click a bench player to nominate a new bowler instead.`
+            : isSelected
+              ? `${characterName(id)} selected — click the pitch to move them, or a bench player to sub them off.`
+              : `Select ${characterName(id)}, then click the pitch to reposition them.`;
           if (badge) badge.textContent = isBowler ? '[bowling]' : isSelected ? '[selected]' : '';
           list.appendChild(row);
         }
@@ -211,9 +249,14 @@ export function createDraftScreen(
           list.appendChild(buildInfoRow('bench — awaiting roster growth'));
         } else {
           for (const id of bench) {
-            const row = buildRow(id, statLineForId(id));
+            const row = buildRow(id, false);
+            row.classList.add(teamClass);
             row.dataset['role'] = 'bench';
             row.disabled = selection.get() === null;
+            row.dataset['tip'] =
+              selection.get() === null
+                ? 'Select an on-field fielder first, then click here to sub them off for this player.'
+                : `Sub the selected fielder off for ${characterName(id)}.`;
             list.appendChild(row);
           }
         }
@@ -231,8 +274,11 @@ export function createDraftScreen(
         list.appendChild(buildInfoRow(`now batting: ${characterName(state.currentBatterId)}`));
       }
 
+      const teamClass = mySide === 'A' ? 'is-team-a' : 'is-team-b';
       for (const id of queue) {
-        const row = buildRow(id, statLineForId(id));
+        const row = buildRow(id, false);
+        row.classList.add(teamClass);
+        row.dataset['tip'] = `Send ${characterName(id)} in next to bat.`;
         list.appendChild(row);
       }
 

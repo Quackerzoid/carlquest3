@@ -3,6 +3,7 @@ import { connect, type MatchStateView, type Net } from './NetModule';
 import {
   createBallView,
   createBatterView,
+  createBenchView,
   createFieldersView,
   createRunnersView,
 } from './RenderModule';
@@ -12,6 +13,7 @@ import { createCameraControls } from './CameraControls';
 import { createDraftScreen } from './DraftScreen';
 import { createPositioningControls, type SelectionStore } from './PositioningControls';
 import { createUI, describeResolution } from './UIModule';
+import { initTooltips } from './Tooltips';
 
 const canvasEl = document.querySelector<HTMLCanvasElement>('#app');
 const hudEl = document.querySelector<HTMLDivElement>('#hud');
@@ -24,6 +26,10 @@ const lobbyErrorEl = document.querySelector<HTMLParagraphElement>('#lobby-error'
 const createButtonEl = document.querySelector<HTMLButtonElement>('#lobby-create');
 const joinButtonEl = document.querySelector<HTMLButtonElement>('#lobby-join');
 const joinCodeInputEl = document.querySelector<HTMLInputElement>('#join-code');
+const tooltipEl = document.querySelector<HTMLDivElement>('#tooltip');
+const readyButtonEl = document.querySelector<HTMLButtonElement>('#ready-button');
+const readyLabelEl = document.querySelector<HTMLSpanElement>('#ready-label');
+const readySubEl = document.querySelector<HTMLSpanElement>('#ready-sub');
 if (
   !canvasEl ||
   !hudEl ||
@@ -35,7 +41,11 @@ if (
   !lobbyErrorEl ||
   !createButtonEl ||
   !joinButtonEl ||
-  !joinCodeInputEl
+  !joinCodeInputEl ||
+  !tooltipEl ||
+  !readyButtonEl ||
+  !readyLabelEl ||
+  !readySubEl
 ) {
   throw new Error('Missing lobby or #app/#hud DOM elements');
 }
@@ -50,12 +60,19 @@ const lobbyError = lobbyErrorEl;
 const createButton = createButtonEl;
 const joinButton = joinButtonEl;
 const joinCodeInput = joinCodeInputEl;
+const readyButton = readyButtonEl;
+const readyLabel = readyLabelEl;
+const readySub = readySubEl;
+
+// One page-lifetime tooltip driver over all [data-tip] elements.
+initTooltips(tooltipEl);
 
 const { scene, camera, start } = createScene(canvas);
 const ball = createBallView(scene);
 const fielders = createFieldersView(scene);
 const runners = createRunnersView(scene);
 const batterView = createBatterView(scene);
+const bench = createBenchView(scene);
 start();
 
 // Camera controls live for the PAGE lifetime, like the views: orbiting is a spectator
@@ -88,6 +105,66 @@ const selection: SelectionStore = {
 
 /** The one live match's connection + teardown; null while in the lobby. */
 let active: { net: Net; teardown(): void } | null = null;
+
+// -------------------------------------------------------------------- READY button
+// Bottom-right, large, stylised. Shows in INITIAL_POSITIONING ('CONFIRM SETUP') and
+// PRE_PLAY ('READY UP'); GREEN idle → BLUE + ✓ 'WAITING FOR OPPONENT' once sent;
+// hidden elsewhere. The server has no per-side confirm echo, so the confirmed state
+// is CLIENT-LOCAL: we latch "sent for this phase instance" on click/Enter and reset
+// the latch whenever the phase changes. Click AND the Enter key (InputModule) drive
+// the SAME net senders — sendConfirmPositioning / sendReadyForPlay per phase.
+type ReadyPhase = 'INITIAL_POSITIONING' | 'PRE_PLAY';
+/** The phase we last confirmed for; null means "not confirmed for the current phase". */
+let readyConfirmedForPhase: ReadyPhase | null = null;
+
+function readyPhaseOf(phase: string): ReadyPhase | null {
+  return phase === 'INITIAL_POSITIONING' || phase === 'PRE_PLAY' ? phase : null;
+}
+
+/** Fire the phase-appropriate ready message (shared by the button and the Enter key). */
+function sendReady(net: Net): void {
+  const rp = readyPhaseOf(net.phase());
+  if (rp === null || readyConfirmedForPhase === rp) return;
+  if (rp === 'INITIAL_POSITIONING') net.sendConfirmPositioning();
+  else net.sendReadyForPlay();
+  readyConfirmedForPhase = rp;
+  renderReady(net.phase());
+}
+
+/** Re-render the READY button for a phase (called on every state patch and on send). */
+function renderReady(phase: string): void {
+  const rp = readyPhaseOf(phase);
+  // Reset the client-local latch whenever we leave the phase we confirmed for.
+  if (readyConfirmedForPhase !== null && readyConfirmedForPhase !== rp) {
+    readyConfirmedForPhase = null;
+  }
+  if (rp === null || active === null) {
+    readyButton.hidden = true;
+    readyButton.dataset['tip'] = '';
+    return;
+  }
+  readyButton.hidden = false;
+  const confirmed = readyConfirmedForPhase === rp;
+  readyButton.classList.toggle('is-waiting', confirmed);
+  if (confirmed) {
+    readyLabel.textContent = 'READY';
+    readySub.textContent = 'waiting for opponent';
+    readyButton.dataset['tip'] = 'You are set. Waiting for your opponent to ready up too.';
+  } else if (rp === 'INITIAL_POSITIONING') {
+    readyLabel.textContent = 'CONFIRM SETUP';
+    readySub.textContent = '';
+    readyButton.dataset['tip'] =
+      'Lock in your line-up and positioning. The play starts once both sides confirm.';
+  } else {
+    readyLabel.textContent = 'READY UP';
+    readySub.textContent = '';
+    readyButton.dataset['tip'] = 'Ready for the next play. It begins once both sides are ready.';
+  }
+}
+
+readyButton.addEventListener('click', () => {
+  if (active) sendReady(active.net);
+});
 
 // Result-overlay buttons: wired ONCE (the UI is a singleton); they act on whichever
 // match is live when clicked.
@@ -142,9 +219,18 @@ function runMatch(net: Net): void {
   // its container on creation, so re-entry after opponentLeft is clean.
   selection.set(null);
   const draftScreen = createDraftScreen(draft, net, selection);
-  const { detach } = attachInput(net, () => {
+  const { detach } = attachInput(net, (action) => {
     // Local key echoes retired with the status line — the feed carries authoritative
-    // events only (play resolutions, rejections, connection changes).
+    // events only. But the READY button's client-local confirmed latch must follow
+    // the Enter key too: InputModule already SENT the message, so here we only mirror
+    // the latch + re-render (no re-send) so the button flips green→blue on Enter.
+    if (action === 'confirm positioning' || action === 'ready for play') {
+      const rp = readyPhaseOf(net.phase());
+      if (rp !== null) {
+        readyConfirmedForPhase = rp;
+        renderReady(net.phase());
+      }
+    }
   });
   const positioningControls = createPositioningControls(
     canvas,
@@ -170,9 +256,12 @@ function runMatch(net: Net): void {
     selection.set(null);
     batterView.update(null, 'neutral', false); // hide the batter; dispose stays page-lifetime
     ui.reset();
+    readyButton.hidden = true; // the READY button belongs to the live match only
+    readyConfirmedForPhase = null;
     if (active?.net === net) active = null;
   };
   active = { net, teardown };
+  readyConfirmedForPhase = null; // fresh confirmed-latch for this match
 
   net.onPlayOutcome((resolution) => {
     if (torn) return;
@@ -245,10 +334,16 @@ function runMatch(net: Net): void {
     lastPhase = state.phase;
     lastPaused = state.paused;
     ball.update(state.ball.x, state.ball.y, state.ball.z, state.ballLive);
+    // Phase drives interpolation speed: fast in PLAY, walk-clamped elsewhere (T4).
+    fielders.setPhase(state.phase);
+    runners.setPhase(state.phase);
+    batterView.setPhase(state.phase);
+    bench.setPhase(state.phase);
     // Kit assignments before the per-entity updates, so a post-draft patch builds
     // new models directly in the right kit (empty pre-draft → everyone neutral).
     fielders.setTeams([...state.squadAIds], [...state.squadBIds]);
     runners.setTeams([...state.squadAIds], [...state.squadBIds]);
+    bench.setTeams([...state.squadAIds], [...state.squadBIds]);
     fielders.update(state.fielders.values());
     runners.update(state.runners.values());
     // Current batter at the batting square; suppressed (hidden, not disposed) while a
@@ -259,6 +354,15 @@ function runMatch(net: Net): void {
       batterId === null ? 'neutral' : kitOf(batterId, state),
       batterId !== null && state.runners.has(batterId),
     );
+    // The batting side's off-field squad walks to a bench beside the field (T4:
+    // pure client choreography, derived only from synced state).
+    bench.update({
+      squadAIds: state.squadAIds,
+      squadBIds: state.squadBIds,
+      battingSide: state.battingSide,
+      currentBatterId: state.currentBatterId,
+      runnerIds: [...state.runners.keys()],
+    });
     if (state.phase === 'LOBBY') {
       // Idempotent refresh: the first patch may arrive after showLobbyWaiting's
       // synchronous read, and later patches are harmless no-op re-assignments.
@@ -268,6 +372,7 @@ function runMatch(net: Net): void {
     }
     draftScreen.update(state, net.mySide());
     ui.update(state, net);
+    renderReady(state.phase);
   });
 }
 

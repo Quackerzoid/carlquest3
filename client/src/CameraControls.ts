@@ -9,28 +9,28 @@ import * as THREE from 'three';
 export interface CameraControls {
   /** True while a drag is in progress, or ended within the last ~150 ms (click suppression). */
   dragging(): boolean;
-  /** Reset to the classic view: position (0,12,-14), lookAt (2,0,10). */
+  /** Reset to the classic view: position (0,26,-30), lookAt (0,0,18). */
   reset(): void;
   detach(): void;
 }
 
 /** Classic match camera pose (byte-identical to SceneModule's default). */
-const CLASSIC_POSITION = new THREE.Vector3(0, 12, -14);
-const CLASSIC_LOOKAT = new THREE.Vector3(2, 0, 10);
+const CLASSIC_POSITION = new THREE.Vector3(0, 26, -30);
+const CLASSIC_LOOKAT = new THREE.Vector3(0, 0, 18);
 
 /**
- * Orbit target: the pitch centre. Approximated as the midpoint of the batting
- * square (0,0) and the bowling square (0,7.5) advanced slightly further up
- * the pitch so the whole running circuit (posts extend to z≈17) stays inside
- * the framed view — (0, 0, 12) per the design brief (§4). Not derived
- * algebraically from LEGAL_ZONE/POSTS because those are asymmetric about z
- * (minZ -6, maxZ 32); a fixed, spec-approved point is simpler and matches
- * the classic camera's lookAt z of 10.
+ * Orbit target: the running-circuit centre on the ×2 field (readable-game
+ * overhaul §A). Posts now extend to z≈34 and the deep field to z≈64, so the
+ * pivot is pushed up the pitch to (0, 0, 18) — roughly the circuit's mid-depth
+ * — so the whole loop stays framed as the camera orbits. A fixed spec-approved
+ * point (not an algebraic LEGAL_ZONE/POSTS derivation, which is asymmetric
+ * about z), matching the classic camera's lookAt.
  */
-const TARGET = new THREE.Vector3(0, 0, 12);
+const TARGET = new THREE.Vector3(0, 0, 18);
 
-const MIN_RADIUS = 12;
-const MAX_RADIUS = 55;
+// Radius clamps ~×2 the pre-overhaul range to suit the doubled field (design §A).
+const MIN_RADIUS = 24;
+const MAX_RADIUS = 110;
 const MIN_POLAR = THREE.MathUtils.degToRad(10);
 const MAX_POLAR = THREE.MathUtils.degToRad(80);
 const DRAG_THRESHOLD_PX = 5;

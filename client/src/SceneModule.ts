@@ -56,9 +56,10 @@ export function createScene(canvas: HTMLCanvasElement) {
   const CZ = (zone.minZ + zone.maxZ) / 2;
   const rand = createLcg(0xca71);
 
-  // Warm late-afternoon atmosphere: gradient sky dome + gentle haze.
+  // Warm late-afternoon atmosphere: gradient sky dome + gentle haze. Fog pushed
+  // back for the ×2 field so the far stands read clearly from the pulled-back camera.
   scene.background = new THREE.Color(0xe9cba4);
-  scene.fog = new THREE.Fog(0xe9cba4, 50, 150);
+  scene.fog = new THREE.Fog(0xe9cba4, 110, 260);
 
   // ---------------------------------------------------------------- sky dome
   // Procedural equirectangular sky (one canvas, mapped onto a large inverted
@@ -276,14 +277,23 @@ export function createScene(canvas: HTMLCanvasElement) {
 
   // ----------------------------------------------------- stadium bowl layout
   // Oval ring outside LEGAL_ZONE with a gap behind the batting end (z < 0).
+  // The ×2 field (LEGAL_ZONE ±40 in x, −12..64 in z) makes halfW≈40, halfD≈38,
+  // so the zone's CORNERS sit ~55 m from the field centre. A fixed additive
+  // margin over the half-extents no longer guarantees the oval CONTAINS those
+  // corners (an ellipse dips inward between its axes), so the base radii are
+  // derived to clear the worst corner: rx/rz chosen so (halfW/rx)²+(halfD/rz)²
+  // stays comfortably below 1. `BOWL_MARGIN` fattens both axes together; the
+  // hoardings/floodlights are pegged to the same base so the whole bowl scales
+  // coherently with CONST.
   const gapCentre = -Math.PI / 2; // batting end direction from field centre
   const gapHalf = 0.62;
   const SEGS = 56;
   const STEPS = 4;
-  const stepDepth = 1.4;
-  const stepRise = 0.8;
-  const standRx0 = halfW + 11; // 31 — clears the zone corners on the oval
-  const standRz0 = halfD + 10; // 29
+  const stepDepth = 1.6;
+  const stepRise = 0.9;
+  const BOWL_MARGIN = 20; // rx≈60, rz≈58 for the ×2 zone — corner check ≈0.87 < 1
+  const standRx0 = halfW + BOWL_MARGIN;
+  const standRz0 = halfD + BOWL_MARGIN;
   const keptSegs: number[] = [];
   for (let i = 0; i < SEGS; i++) {
     const th = (i + 0.5) * ((2 * Math.PI) / SEGS) - Math.PI;
@@ -409,9 +419,11 @@ export function createScene(canvas: HTMLCanvasElement) {
     atlas.colorSpace = THREE.SRGBColorSpace;
     atlas.anisotropy = 4;
 
-    const boardRx = halfW + 9; // 29 — oval still contains the zone corners
-    const boardRz = halfD + 8; // 27
-    const boardH = 0.9;
+    // Hoardings sit just INSIDE the stands (BOWL_MARGIN − 3), still fat enough to
+    // clear the zone corners (corner check ≈0.97 < 1) on the ×2 field.
+    const boardRx = halfW + (BOWL_MARGIN - 3);
+    const boardRz = halfD + (BOWL_MARGIN - 3);
+    const boardH = 1.4;
     const positions: number[] = [];
     const uvs: number[] = [];
     const indices: number[] = [];
@@ -445,9 +457,10 @@ export function createScene(canvas: HTMLCanvasElement) {
   // ---------------------------------------------------- floodlight pylons
   // Four corner masts with emissive-look lamp panels (textures, no lights).
   {
-    // Mast height chosen so the lamp heads sit INSIDE the fixed camera's
-    // frustum (~13 m visible at the far pylons) — taller masts render headless.
-    const mastGeo = new THREE.CylinderGeometry(0.35, 0.5, 12, 6);
+    // Taller masts for the ×2 venue — the pulled-back orbit camera frames them
+    // comfortably now (see the default pose below).
+    const MAST_H = 18;
+    const mastGeo = new THREE.CylinderGeometry(0.45, 0.65, MAST_H, 6);
     const mastMat = new THREE.MeshLambertMaterial({ color: 0x707880 });
     const lampCtx = make2dContext(128, 96);
     lampCtx.fillStyle = '#2a2e33';
@@ -461,17 +474,17 @@ export function createScene(canvas: HTMLCanvasElement) {
     const lampTex = new THREE.CanvasTexture(lampCtx.canvas);
     lampTex.colorSpace = THREE.SRGBColorSpace;
     const headMat = new THREE.MeshBasicMaterial({ map: lampTex });
-    const headGeo = new THREE.PlaneGeometry(2.8, 2.0);
+    const headGeo = new THREE.PlaneGeometry(4.2, 3.0);
     for (const th of [Math.PI / 4, (3 * Math.PI) / 4, (-3 * Math.PI) / 4, -Math.PI / 4]) {
-      const p = oval(standRx0 + 4.5, standRz0 + 4.5, th);
+      const p = oval(standRx0 + 5, standRz0 + 5, th);
       const pylon = new THREE.Group();
       pylon.position.set(p.x, 0, p.z);
       pylon.lookAt(CX, 0, CZ);
       const mast = new THREE.Mesh(mastGeo, mastMat);
-      mast.position.y = 6;
+      mast.position.y = MAST_H / 2;
       pylon.add(mast);
       const head = new THREE.Mesh(headGeo, headMat);
-      head.position.set(0, 12.4, 0.5);
+      head.position.set(0, MAST_H + 0.6, 0.7);
       head.rotation.x = -0.35; // tilt down towards the field
       pylon.add(head);
       scene.add(pylon);
@@ -484,10 +497,11 @@ export function createScene(canvas: HTMLCanvasElement) {
   sun.position.set(25, 30, -18);
   scene.add(sun);
 
-  // Camera: behind the batter, looking across the field
+  // Camera: behind the batter, pulled back and up to frame the whole ×2 field
+  // (posts reach z≈34, deep field z≈64). Must match CameraControls' CLASSIC pose.
   const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
-  camera.position.set(0, 12, -14);
-  camera.lookAt(new THREE.Vector3(2, 0, 10));
+  camera.position.set(0, 26, -30);
+  camera.lookAt(new THREE.Vector3(0, 0, 18));
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 
