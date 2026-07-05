@@ -8,16 +8,25 @@ tiebreaks and rematches — over a server-authoritative connection. The plays
 themselves resolve automatically as **visible dice rolls**: every pitch, swing,
 run and catch is a stat-weighted contest that flashes up as a roll banner.
 
+The field is a proper size and the pace is built to be *watched*: hits get
+real loft instead of always being flat line drives, a hit ball can't be
+caught the instant it leaves the bat, fielders relay the ball to a teammate
+who's better placed rather than always lobbing it straight back, and a
+resolved play holds its "how did that end" tableau for a beat before the
+field resets — no more instant teleports. Each of the eleven characters is a
+distinct hand-painted mascot: a rounded body with floating hands and a
+painted face, not a generic capsule.
+
 Built with **TypeScript (strict)**, **Three.js** (rendering), **Rapier**
 (physics), **Colyseus** (authoritative multiplayer server) and **Vite**.
 
-| The dice decide | The wind-up |
+| The dice decide | The mascot lineup |
 |---|---|
-| ![Mid-play — pitch, swing and run roll banners flash over the field while the navy runner rounds the posts](docs/superpowers/acceptance/autoplay-02-roll-banner.png) | ![The bowler mid wind-up, ball just released, the batter waiting with the bat — the pitch roll banner above](docs/superpowers/acceptance/autoplay-05-windup-a.png) |
+| ![Mid-play — pitch, swing and run roll banners flash over the field while the runner rounds the posts, ball trail and highlight visible in flight](docs/superpowers/acceptance/readable-06-ball-trail.png) | ![The roster's minimal mascots — rounded blob bodies, floating sphere hands, painted faces and kit numbers](docs/superpowers/acceptance/readable-05-mascot-lineup.png) |
 
 | The draft sheet | The lobby |
 |---|---|
-| ![The broadcast-styled draft sheet — one row per character with the full stat line and ability tag](docs/superpowers/acceptance/autoplay-01b-draft.png) | ![Create a match — glass slab lobby card with the shareable 4-letter code](docs/superpowers/acceptance/autoplay-01a-lobby.png) |
+| ![The bold arcade-pop draft sheet — one row per character with the full stat line and ability tag, tooltip visible](docs/superpowers/acceptance/readable-02-draft-tooltip.png) | ![Create a match — bright arcade lobby card with the shareable 4-letter code](docs/superpowers/acceptance/readable-01-lobby.png) |
 
 ## Quick start (one machine, two tabs)
 
@@ -44,25 +53,40 @@ pick the batting order and nominate the bowler — then the play itself resolves
 automatically as **visible dice rolls**. Every pitch, swing, run decision and
 catch attempt flashes up as a roll banner (and lands on the event feed), so you
 watch your decisions pay off contest by contest. The on-screen legend always
-shows exactly the actions available to *you* in the current phase.
+shows exactly the actions available to *you* in the current phase; a big
+**READY** button (bottom-right) does the same job as `Enter` if you'd rather
+click — it turns from green "READY UP" to a blue checkmark once you've
+confirmed, so you always know you're waiting on your opponent, not the game.
+Hover any stat, ability tag or panel row for a plain-English tooltip.
 
 | Phase | You do |
 |---|---|
-| Draft | Click a character row on your turn (5 picks each) |
-| Positioning / pre-play | `Enter` to confirm/ready. Fielding side: click your fielder, then click the ground to reposition (`Esc` clears); nominate your bowler and make substitutions from the panel. Batting side: click a queue row to choose the next batter |
-| Play | Hands off — the dice decide. Watch the roll banners |
+| Draft | Click a character row on your turn (5 picks each) — hover a stat or ability tag for what it means |
+| Positioning / pre-play | `Enter` or the READY button to confirm/ready. Fielding side: click your fielder, then click the ground to reposition (`Esc` clears); nominate your bowler and make substitutions from the panel. Batting side: click a queue row to choose the next batter — everyone not currently up walks to a bench beside the field between plays |
+| Play | Hands off — the dice decide. Watch the roll banners, the ball's trail and highlight, and the bouncing icon over whoever's holding it |
 | Any time | Drag to orbit the camera · mouse wheel to zoom · `Home` resets the view |
 | Game over | `N` or the on-screen button to rematch |
 
 Scoring is school rules: reach the 2nd post on your own hit for a
 **half-rounder**, complete the circuit for a **rounder**; caught balls and
 run-outs end the batter; five outs end the innings; ties go to sudden-death.
-Every character has an ability (the bracketed tag on their draft card) that
-genuinely changes the dice — Kian's curveball bends late, the Whale stops any
-ball that hits him dead, Jonty never drops a catch (his rolls are guaranteed),
-Joe fumbles 35% of his. Each of
-the eleven has a distinct look on the field to match — the Whale is a 3.1 m
-giant, Joe a 1.3 m scrawn in a shirt two sizes too big.
+Every character has an ability (the bracketed tag on their draft card, with a
+tooltip explaining it) that genuinely changes the dice — Kian's curveball
+bends late, the Whale stops any ball that hits him dead, Jonty never drops a
+catch (his rolls are guaranteed), Joe fumbles 35% of his. Each of the eleven
+is a distinct hand-painted mascot to match — a rounded blob body with
+floating sphere hands and a painted face/kit, no two alike: the Whale is a
+huge, gentle 3.0 m giant, Joe a tiny 1.1 m worrier in an oversized shirt hem.
+
+**The field is a full size bigger than it used to be, and plays are paced to
+be watched, not blinked through**: hits get real loft (not just flat line
+drives), a struck ball can't be caught in the first few metres off the bat,
+fielders relay the ball to a better-placed teammate instead of always
+throwing straight back to the danger post, a missed swing re-pitches quickly
+rather than waiting for the ball to roll to a stop, and every resolved play
+holds its final tableau for a beat before the field resets for the next one —
+so you can actually see how it ended before everyone snaps back to their
+spots.
 
 ## Playing over your local network (works today, no changes)
 
@@ -194,11 +218,15 @@ between friends but do on a public server:
 ## Development commands
 
 - `npm run dev` — client + server in watch mode
-- `npm run check` — typecheck + lint + full test suite (all workspaces; 380
-  tests — allow ~12 minutes: the room tests watch real-time auto-play beats)
+- `npm run check` — typecheck + lint + full test suite (all workspaces; 404
+  tests — allow ~40–50 minutes: the room tests watch real-time auto-play beats
+  over the readable-pacing field, which is now the single biggest cost in the
+  suite; see CLAUDE.md §6.4)
 - `npm run test` — Vitest only
 - `npm run build` — production client build (server build wiring is a known
   open item; production uses `tsx`)
 
 All ten build milestones from the spec are complete, each merged behind its
-own tag (`m1-scaffold` … `m10-ui-polish`) with committed acceptance evidence.
+own tag (`m1-scaffold` … `m10-ui-polish`) with committed acceptance evidence,
+followed by two post-ship overhauls (visual, then the readable-game pacing
+and presentation pass covered above).

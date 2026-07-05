@@ -1,0 +1,40 @@
+[3.1s] OK: 4-letter room code displayed (got 'ROFW')
+[7.2s] page 1 reached DRAFT
+[8.5s] page 2 reached DRAFT
+[17.8s] OK: ability tooltip text rendered ('Bends the ball hard late in its flight — the curve only bites near the batter, so it is tough to read.')
+[24.9s] ability tooltip captured mid-hover on the draft sheet
+[69.5s] OK: table-order draft clicked (carl,kian,laurie,josh,joel,darcy,jonty,robbie,joe,ricy)
+[70.4s] both pages at INITIAL_POSITIONING
+[71.4s] OK: READY button starts NOT waiting (class='')
+[71.8s] OK: READY button reads CONFIRM SETUP before click (got 'CONFIRM SETUP')
+[76.0s] READY green background sampled: rgb(23, 179, 74)
+[81.4s] OK: READY button gained is-waiting class after click (class='is-waiting')
+[81.7s] OK: READY sub-label reads 'waiting for opponent' (got 'waiting for opponent')
+[81.7s] OK: READY button background colour actually changed ('rgb(23, 179, 74)' -> 'rgb(47, 123, 232)')
+[85.4s] READY blue background sampled: rgb(47, 123, 232)
+[96.0s] phase PLAY — hands off, watching
+[96.1s] OK: PLAY legend visible ('Enterconfirm/readyNrematchplay in progress — the dice decide')
+[103.5s] OK: #hud-board background colour readable (255,253,246)
+[103.5s] OK: #hud-board background is BRIGHT (arcade-pop, not dark-glass) — avg rgb 251 (rgb=[255,253,246])
+[164.0s] OK: ball trail/highlight screenshot captured during a live PLAY window
+[164.0s] ball trail/highlight frame captured (polled burst during live PLAY)
+[178.1s] first play resolved on page 1
+[190.5s] OK: holder-icon screenshot captured during the second play (pitcher pre-release hold window)
+[190.5s] holder-icon frame captured (polled burst, pitcher pre-release hold window, second play)
+[205.1s] mascot framing candidate 'low, yawed towards bench (screen-left)': tone-pixel score 9076
+[216.7s] mascot framing candidate 'low, yawed further left': tone-pixel score 12274
+[228.6s] mascot framing candidate 'lower angle, moderate yaw': tone-pixel score 7896
+[240.2s] mascot framing candidate 'shallower angle, strong yaw': tone-pixel score 9396
+[240.2s] OK: at least one close mascot framing candidate scored (12274)
+[240.2s] mascot lineup committed: best framing 'low, yawed further left' (score 12274)
+[240.3s] watching for a new batter name to replace 'Joel' (walk-start trigger)
+[248.8s] OK: a new batter was assigned (walk-start trigger fired) within the watch window
+[249.1s] new batter assigned: 'Jonty' — batting side kit hue = navy ('you · A · batting') — capturing the walk now (READY clicks paused on both pages)
+[258.7s] OK: enough walk-phase position samples collected (6)
+[258.7s] navy-kit centroid moved 35.4 screen px over ~1s (A={"x":772.7587719298245,"y":501.67105263157896,"n":228}, B={"x":806.7755775577558,"y":511.44224422442244,"n":303})
+[258.7s] OK: batter kit-patch centroid moved a NON-TRIVIAL distance (35.4px, threshold 8px) — proves real walking progress, not a frozen/arrived figure
+[258.7s] OK: the walk-burst frames are not byte-identical (something is animating)
+[258.7s] OK: no figure jump exceeds the walk-speed screen-space ceiling outside PLAY (max 180.1px over 500ms samples, ceiling 250px, 6 samples)
+[258.7s] OK: zero page errors on page 1 ([])
+[258.7s] OK: zero page errors on page 2 ([])
+[258.8s] BROWSER ACCEPTANCE PASSED

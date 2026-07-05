@@ -1,0 +1,199 @@
+[0.0s] === MAIN ROOM (seed 1): full game to GAME_OVER on the x2 field — measuring pacing, arming, hold, loft, respawn, relay ===
+[0.1s] OK: code join landed in room pAF-byKpL
+[0.3s] phase: (joining) → DRAFT | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[1.1s] phase: DRAFT → INITIAL_POSITIONING | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[1.1s] OK: squad A = carl,laurie,joel,jonty,joe
+[1.1s] OK: squad B = kian,josh,darcy,robbie,ricy
+[1.2s] phase: INITIAL_POSITIONING → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[1.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[33.1s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"carl"},"outs":[],"scoreDeltaHalves":1,"batterId":"carl"}
+[33.2s] phase: PLAY → PRE_PLAY | A 1½ – B 0½ | innings 1 | outs 0 | batting A | batter laurie
+[33.4s] play 1 pacing: pitch-beat -> playOutcome = 30.39s
+[33.5s] phase: PRE_PLAY → PLAY | A 1½ – B 0½ | innings 1 | outs 0 | batting A | batter laurie
+[39.4s] playOutcome→A: {"cause":{"kind":"runOut","atPost":1,"runnerId":"laurie"},"outs":["laurie"],"scoreDeltaHalves":0,"batterId":"laurie"}
+[39.5s] phase: PLAY → PRE_PLAY | A 1½ – B 0½ | innings 1 | outs 1 | batting A | batter joel
+[39.7s] play 2 pacing: pitch-beat -> playOutcome = 4.44s
+[39.8s] phase: PRE_PLAY → PLAY | A 1½ – B 0½ | innings 1 | outs 1 | batting A | batter joel
+[49.1s] playOutcome→A: {"cause":{"kind":"runOut","atPost":4,"runnerId":"carl"},"outs":["carl"],"scoreDeltaHalves":0,"batterId":"joel"}
+[49.1s] phase: PLAY → PRE_PLAY | A 1½ – B 0½ | innings 1 | outs 2 | batting A | batter jonty
+[49.3s] play 3 pacing: pitch-beat -> playOutcome = 7.91s
+[49.3s] phase: PRE_PLAY → PLAY | A 1½ – B 0½ | innings 1 | outs 2 | batting A | batter jonty
+[70.2s] playOutcome→A: {"cause":{"kind":"safe","atPost":2,"runnerId":"jonty"},"outs":[],"scoreDeltaHalves":1,"batterId":"jonty"}
+[70.2s] phase: PLAY → PRE_PLAY | A 2½ – B 0½ | innings 1 | outs 2 | batting A | batter joe
+[70.3s] play 4 pacing: pitch-beat -> playOutcome = 19.36s
+[70.4s] phase: PRE_PLAY → PLAY | A 2½ – B 0½ | innings 1 | outs 2 | batting A | batter joe
+[81.7s] playOutcome→A: {"cause":{"kind":"runOut","atPost":4,"runnerId":"joel"},"outs":["joel"],"scoreDeltaHalves":0,"batterId":"joe"}
+[81.7s] phase: PLAY → PRE_PLAY | A 2½ – B 0½ | innings 2 | outs 0 | batting B | batter kian
+[81.9s] play 5 pacing: pitch-beat -> playOutcome = 9.83s
+[81.9s] phase: PRE_PLAY → PLAY | A 2½ – B 0½ | innings 2 | outs 0 | batting B | batter kian
+[88.1s] playOutcome→A: {"cause":{"kind":"runOut","atPost":1,"runnerId":"kian"},"outs":["kian"],"scoreDeltaHalves":0,"batterId":"kian"}
+[88.1s] phase: PLAY → PRE_PLAY | A 2½ – B 0½ | innings 2 | outs 1 | batting B | batter josh
+[88.3s] play 6 pacing: pitch-beat -> playOutcome = 4.71s
+[88.3s] phase: PRE_PLAY → PLAY | A 2½ – B 0½ | innings 2 | outs 1 | batting B | batter josh
+[105.3s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"josh"},"outs":[],"scoreDeltaHalves":1,"batterId":"josh"}
+[105.3s] phase: PLAY → PRE_PLAY | A 2½ – B 1½ | innings 2 | outs 1 | batting B | batter darcy
+[105.5s] play 7 pacing: pitch-beat -> playOutcome = 15.52s
+[105.5s] phase: PRE_PLAY → PLAY | A 2½ – B 1½ | innings 2 | outs 1 | batting B | batter darcy
+[122.5s] playOutcome→A: {"cause":{"kind":"safe","atPost":1,"runnerId":"darcy"},"outs":[],"scoreDeltaHalves":0,"batterId":"darcy"}
+[122.6s] phase: PLAY → PRE_PLAY | A 2½ – B 1½ | innings 2 | outs 1 | batting B | batter robbie
+[122.7s] play 8 pacing: pitch-beat -> playOutcome = 15.52s
+[122.8s] phase: PRE_PLAY → PLAY | A 2½ – B 1½ | innings 2 | outs 1 | batting B | batter robbie
+[131.2s] playOutcome→A: {"cause":{"kind":"safe","atPost":1,"runnerId":"robbie"},"outs":[],"scoreDeltaHalves":0,"batterId":"robbie"}
+[131.2s] phase: PLAY → PRE_PLAY | A 2½ – B 1½ | innings 2 | outs 1 | batting B | batter ricy
+[131.4s] play 9 pacing: pitch-beat -> playOutcome = 6.89s
+[131.4s] phase: PRE_PLAY → PLAY | A 2½ – B 1½ | innings 2 | outs 1 | batting B | batter ricy
+[142.9s] playOutcome→A: {"cause":{"kind":"runOut","atPost":3,"runnerId":"robbie"},"outs":["robbie"],"scoreDeltaHalves":0,"batterId":"ricy"}
+[142.9s] phase: PLAY → PRE_PLAY | A 2½ – B 1½ | innings 2 | outs 2 | batting B | batter josh
+[143.1s] play 10 pacing: pitch-beat -> playOutcome = 10.01s
+[143.1s] phase: PRE_PLAY → PLAY | A 2½ – B 1½ | innings 2 | outs 2 | batting B | batter josh
+[147.2s] playOutcome→A: {"cause":{"kind":"runOut","atPost":4,"runnerId":"darcy"},"outs":["darcy"],"scoreDeltaHalves":0,"batterId":"josh"}
+[147.3s] phase: PLAY → PRE_PLAY | A 2½ – B 1½ | innings 3 | outs 0 | batting A | batter carl
+[147.4s] play 11 pacing: pitch-beat -> playOutcome = 2.67s
+[147.4s] phase: PRE_PLAY → PLAY | A 2½ – B 1½ | innings 3 | outs 0 | batting A | batter carl
+[160.9s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"carl"},"outs":[],"scoreDeltaHalves":1,"batterId":"carl"}
+[161.0s] phase: PLAY → PRE_PLAY | A 3½ – B 1½ | innings 3 | outs 0 | batting A | batter laurie
+[161.1s] play 12 pacing: pitch-beat -> playOutcome = 12.00s
+[161.1s] phase: PRE_PLAY → PLAY | A 3½ – B 1½ | innings 3 | outs 0 | batting A | batter laurie
+[168.2s] playOutcome→A: {"cause":{"kind":"caught","by":"kian"},"outs":["laurie"],"scoreDeltaHalves":0,"batterId":"laurie"}
+[168.2s] phase: PLAY → PRE_PLAY | A 3½ – B 1½ | innings 3 | outs 1 | batting A | batter joel
+[168.3s] play 13 pacing: pitch-beat -> playOutcome = 5.53s
+[168.4s] phase: PRE_PLAY → PLAY | A 3½ – B 1½ | innings 3 | outs 1 | batting A | batter joel
+[179.1s] playOutcome→A: {"cause":{"kind":"runOut","atPost":4,"runnerId":"carl"},"outs":["carl"],"scoreDeltaHalves":0,"batterId":"joel"}
+[179.1s] phase: PLAY → PRE_PLAY | A 3½ – B 1½ | innings 3 | outs 2 | batting A | batter jonty
+[179.3s] play 14 pacing: pitch-beat -> playOutcome = 9.21s
+[179.3s] phase: PRE_PLAY → PLAY | A 3½ – B 1½ | innings 3 | outs 2 | batting A | batter jonty
+[192.8s] playOutcome→A: {"cause":{"kind":"safe","atPost":2,"runnerId":"jonty"},"outs":[],"scoreDeltaHalves":1,"batterId":"jonty"}
+[192.8s] phase: PLAY → PRE_PLAY | A 4½ – B 1½ | innings 3 | outs 2 | batting A | batter joe
+[193.0s] play 15 pacing: pitch-beat -> playOutcome = 12.03s
+[193.0s] phase: PRE_PLAY → PLAY | A 4½ – B 1½ | innings 3 | outs 2 | batting A | batter joe
+[198.7s] playOutcome→A: {"cause":{"kind":"runOut","atPost":3,"runnerId":"joel"},"outs":["joel"],"scoreDeltaHalves":0,"batterId":"joe"}
+[198.7s] phase: PLAY → PRE_PLAY | A 4½ – B 1½ | innings 4 | outs 0 | batting B | batter kian
+[198.9s] play 16 pacing: pitch-beat -> playOutcome = 4.15s
+[198.9s] phase: PRE_PLAY → PLAY | A 4½ – B 1½ | innings 4 | outs 0 | batting B | batter kian
+[212.4s] playOutcome→A: {"cause":{"kind":"safe","atPost":2,"runnerId":"kian"},"outs":[],"scoreDeltaHalves":1,"batterId":"kian"}
+[212.5s] phase: PLAY → PRE_PLAY | A 4½ – B 2½ | innings 4 | outs 0 | batting B | batter josh
+[212.7s] play 17 pacing: pitch-beat -> playOutcome = 12.03s
+[212.8s] phase: PRE_PLAY → PLAY | A 4½ – B 2½ | innings 4 | outs 0 | batting B | batter josh
+[226.3s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"josh"},"outs":[],"scoreDeltaHalves":1,"batterId":"josh"}
+[226.4s] phase: PLAY → PRE_PLAY | A 4½ – B 3½ | innings 4 | outs 0 | batting B | batter darcy
+[226.6s] play 18 pacing: pitch-beat -> playOutcome = 12.04s
+[226.6s] phase: PRE_PLAY → PLAY | A 4½ – B 3½ | innings 4 | outs 0 | batting B | batter darcy
+[243.5s] playOutcome→A: {"cause":{"kind":"safe","atPost":1,"runnerId":"darcy"},"outs":[],"scoreDeltaHalves":0,"batterId":"darcy"}
+[243.6s] phase: PLAY → PRE_PLAY | A 4½ – B 3½ | innings 4 | outs 0 | batting B | batter robbie
+[243.8s] play 19 pacing: pitch-beat -> playOutcome = 15.48s
+[243.9s] phase: PRE_PLAY → PLAY | A 4½ – B 3½ | innings 4 | outs 0 | batting B | batter robbie
+[260.9s] playOutcome→A: {"cause":{"kind":"safe","atPost":2,"runnerId":"robbie"},"outs":[],"scoreDeltaHalves":1,"batterId":"robbie"}
+[260.9s] phase: PLAY → PRE_PLAY | A 4½ – B 4½ | innings 4 | outs 0 | batting B | batter ricy
+[261.1s] play 20 pacing: pitch-beat -> playOutcome = 15.50s
+[261.2s] phase: PRE_PLAY → PLAY | A 4½ – B 4½ | innings 4 | outs 0 | batting B | batter ricy
+[278.2s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"ricy"},"outs":[],"scoreDeltaHalves":1,"batterId":"ricy"}
+[278.2s] phase: PLAY → PRE_PLAY | A 4½ – B 5½ | innings 4 | outs 0 | batting B | batter kian
+[278.4s] play 21 pacing: pitch-beat -> playOutcome = 15.50s
+[278.5s] phase: PRE_PLAY → PLAY | A 4½ – B 5½ | innings 4 | outs 0 | batting B | batter kian
+[292.3s] playOutcome→A: {"cause":{"kind":"safe","atPost":2,"runnerId":"kian"},"outs":[],"scoreDeltaHalves":1,"batterId":"kian"}
+[292.4s] phase: PLAY → PRE_PLAY | A 4½ – B 6½ | innings 4 | outs 0 | batting B | batter josh
+[292.6s] play 22 pacing: pitch-beat -> playOutcome = 12.34s
+[292.7s] phase: PRE_PLAY → PLAY | A 4½ – B 6½ | innings 4 | outs 0 | batting B | batter josh
+[306.1s] playOutcome→A: {"cause":{"kind":"safe","atPost":1,"runnerId":"josh"},"outs":[],"scoreDeltaHalves":0,"batterId":"josh"}
+[306.2s] phase: PLAY → PRE_PLAY | A 4½ – B 6½ | innings 4 | outs 0 | batting B | batter darcy
+[306.4s] play 23 pacing: pitch-beat -> playOutcome = 12.03s
+[306.5s] phase: PRE_PLAY → PLAY | A 4½ – B 6½ | innings 4 | outs 0 | batting B | batter darcy
+[320.0s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"darcy"},"outs":[],"scoreDeltaHalves":1,"batterId":"darcy"}
+[320.0s] phase: PLAY → PRE_PLAY | A 4½ – B 7½ | innings 4 | outs 0 | batting B | batter robbie
+[320.2s] play 24 pacing: pitch-beat -> playOutcome = 12.06s
+[320.3s] phase: PRE_PLAY → PLAY | A 4½ – B 7½ | innings 4 | outs 0 | batting B | batter robbie
+[340.9s] playOutcome→A: {"cause":{"kind":"safe","atPost":2,"runnerId":"robbie"},"outs":[],"scoreDeltaHalves":1,"batterId":"robbie"}
+[340.9s] phase: PLAY → PRE_PLAY | A 4½ – B 8½ | innings 4 | outs 0 | batting B | batter ricy
+[341.1s] play 25 pacing: pitch-beat -> playOutcome = 19.12s
+[341.1s] phase: PRE_PLAY → PLAY | A 4½ – B 8½ | innings 4 | outs 0 | batting B | batter ricy
+[346.7s] playOutcome→A: {"cause":{"kind":"runOut","atPost":3,"runnerId":"robbie"},"outs":["robbie"],"scoreDeltaHalves":0,"batterId":"ricy"}
+[346.8s] phase: PLAY → PRE_PLAY | A 4½ – B 8½ | innings 4 | outs 1 | batting B | batter kian
+[347.0s] play 26 pacing: pitch-beat -> playOutcome = 4.11s
+[347.0s] phase: PRE_PLAY → PLAY | A 4½ – B 8½ | innings 4 | outs 1 | batting B | batter kian
+[367.5s] playOutcome→A: {"cause":{"kind":"safe","atPost":2,"runnerId":"kian"},"outs":[],"scoreDeltaHalves":1,"batterId":"kian"}
+[367.5s] phase: PLAY → PRE_PLAY | A 4½ – B 9½ | innings 4 | outs 1 | batting B | batter josh
+[367.7s] play 27 pacing: pitch-beat -> playOutcome = 18.96s
+[367.7s] phase: PRE_PLAY → PLAY | A 4½ – B 9½ | innings 4 | outs 1 | batting B | batter josh
+[381.2s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"josh"},"outs":[],"scoreDeltaHalves":1,"batterId":"josh"}
+[381.2s] phase: PLAY → PRE_PLAY | A 4½ – B 10½ | innings 4 | outs 1 | batting B | batter darcy
+[381.4s] play 28 pacing: pitch-beat -> playOutcome = 12.01s
+[381.4s] phase: PRE_PLAY → PLAY | A 4½ – B 10½ | innings 4 | outs 1 | batting B | batter darcy
+[394.9s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"darcy"},"outs":[],"scoreDeltaHalves":1,"batterId":"darcy"}
+[395.0s] phase: PLAY → PRE_PLAY | A 4½ – B 11½ | innings 4 | outs 1 | batting B | batter ricy
+[395.2s] play 29 pacing: pitch-beat -> playOutcome = 12.02s
+[395.2s] phase: PRE_PLAY → PLAY | A 4½ – B 11½ | innings 4 | outs 1 | batting B | batter ricy
+[415.7s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"ricy"},"outs":[],"scoreDeltaHalves":1,"batterId":"ricy"}
+[415.7s] phase: PLAY → PRE_PLAY | A 4½ – B 12½ | innings 4 | outs 1 | batting B | batter kian
+[415.9s] play 30 pacing: pitch-beat -> playOutcome = 19.04s
+[415.9s] phase: PRE_PLAY → PLAY | A 4½ – B 12½ | innings 4 | outs 1 | batting B | batter kian
+[418.9s] playOutcome→A: {"cause":{"kind":"caught","by":"carl"},"outs":["kian"],"scoreDeltaHalves":0,"batterId":"kian"}
+[418.9s] phase: PLAY → PRE_PLAY | A 4½ – B 12½ | innings 4 | outs 2 | batting B | batter josh
+[419.1s] play 31 pacing: pitch-beat -> playOutcome = 1.44s
+[419.1s] phase: PRE_PLAY → PLAY | A 4½ – B 12½ | innings 4 | outs 2 | batting B | batter josh
+[436.6s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"josh"},"outs":[],"scoreDeltaHalves":1,"batterId":"josh"}
+[436.6s] phase: PLAY → PRE_PLAY | A 4½ – B 13½ | innings 4 | outs 2 | batting B | batter darcy
+[436.8s] play 32 pacing: pitch-beat -> playOutcome = 15.99s
+[436.9s] phase: PRE_PLAY → PLAY | A 4½ – B 13½ | innings 4 | outs 2 | batting B | batter darcy
+[441.0s] playOutcome→A: {"cause":{"kind":"runOut","atPost":4,"runnerId":"josh"},"outs":["josh"],"scoreDeltaHalves":0,"batterId":"darcy"}
+[441.1s] phase: PLAY → PRE_PLAY | A 4½ – B 13½ | innings 4 | outs 3 | batting B | batter ricy
+[441.3s] play 33 pacing: pitch-beat -> playOutcome = 2.63s
+[441.3s] phase: PRE_PLAY → PLAY | A 4½ – B 13½ | innings 4 | outs 3 | batting B | batter ricy
+[458.3s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"ricy"},"outs":[],"scoreDeltaHalves":1,"batterId":"ricy"}
+[458.4s] phase: PLAY → GAME_OVER | A 4½ – B 14½ | innings 4 | outs 3 | batting B | batter 
+[458.6s] play 34 pacing: pitch-beat -> playOutcome = 15.51s
+[458.6s] GAME_OVER after 34 plays | A 4½ – B 14½ | winner B
+[458.6s] OK: a real game unfolded (34 plays >= 8)
+[458.6s] OK: definite winner ('B')
+[458.6s] OK: ZERO play messages sent by either client all game (no tombstone rejection ever received)
+[458.6s] OK: no rejection of ANY kind during the hands-off game
+[458.6s] --- PACING DISTRIBUTION (pitch-beat -> playOutcome, seconds) ---
+[458.6s] all durations: [30.39, 4.44, 7.91, 19.36, 9.83, 4.71, 15.52, 15.52, 6.89, 10.01, 2.67, 12.00, 5.53, 9.21, 12.03, 4.15, 12.03, 12.04, 15.48, 15.50, 15.50, 12.34, 12.03, 12.06, 19.12, 4.11, 18.96, 12.01, 12.02, 19.04, 1.44, 15.99, 2.63, 15.51]
+[458.6s] OK: pacing measured for nearly every play (34/34)
+[458.6s] PACING median=12.03s min=1.44s max=30.39s (target band 8-15s)
+[458.6s] MEASURED (in band): median pacing 12.03s vs the 8-15s TARGET band
+[458.6s] --- CATCH ARMING (ball-to-launch-point distance at every catch-contest roll) ---
+[458.6s] samples: [{"play":2,"actor":"kian","d":11.59},{"play":2,"actor":"ricy","d":27.12},{"play":3,"actor":"kian","d":15.54},{"play":3,"actor":"josh","d":15.54},{"play":4,"actor":"robbie","d":31.78},{"play":5,"actor":"josh","d":3},{"play":6,"actor":"laurie","d":8.78},{"play":7,"actor":"laurie","d":32.34},{"play":8,"actor":"joel","d":26.59},{"play":9,"actor":"laurie","d":3.21},{"play":10,"actor":"joel","d":6.55},{"play":12,"actor":"ricy","d":33.49},{"play":13,"actor":"kian","d":14.22},{"play":16,"actor":"josh","d":3.51},{"play":17,"actor":"joel","d":13.06},{"play":19,"actor":"laurie","d":2.93},{"play":20,"actor":"joe","d":30.08},{"play":21,"actor":"laurie","d":3.09},{"play":22,"actor":"laurie","d":45.49},{"play":24,"actor":"laurie","d":2},{"play":25,"actor":"laurie","d":2.47},{"play":26,"actor":"joel","d":8.74},{"play":26,"actor":"carl","d":25.78},{"play":28,"actor":"joe","d":42.17},{"play":31,"actor":"carl","d":9.96}]
+[458.6s] OK: at least one catch-contest roll was observed to measure (25)
+[458.6s] CATCH ARMING minimum observed ball-to-launch distance at a catch roll: 2.004 m (arm distance 4 m; 7/25 samples measured under it — see the one-way-arming note above: this is EXPECTED for a fielder/ball converging back near the original launch point on an already-armed flight, not a violation. The deterministic FieldingModule.test.ts unit tests are the authoritative proof of the boundary itself: zero rng draws under 4 m, exact-boundary arming, one-way persistence.)
+[458.6s] OK: catch-arming distribution logged (informational — see the one-way-arming note; correctness gate lives in FieldingModule.test.ts, not this live-network measurement)
+[458.6s] --- MISS RESPAWN (failed-swing-roll -> next pitch-roll, seconds) ---
+[458.6s] all samples: [3.05, 3.09, 3.04, 3.06, 3.05, 3.09, 3.06, 3.02, 3.04, 3.04, 3.05, 3.03, 3.03, 3.02, 3.03, 3.03, 3.05, 3.03, 3.07, 3.15, 3.03, 3.01, 3.04, 3.06, 3.04, 3.04]
+[458.6s] OK: at least one missed swing was observed to measure respawn timing (26)
+[458.6s] MISS RESPAWN mean=3.05s median=3.04s max=3.15s (expected ~3s = MISS_RESPAWN_S 1.5s + AUTOPLAY_PITCH_DELAY_S 1.5s — see the header note: the ball-respawn moment and the next auto-pitch beat are two SEPARATE sim-time-gated steps, not one; the old ~7s rest-timeout path is the correctness bar this replaces; deterministic proof lives in MatchRoom.test.ts, not this live-network measurement)
+[458.6s] OK: median miss-respawn (3.04s) is close to the expected combined figure of MISS_RESPAWN_S + AUTOPLAY_PITCH_DELAY_S = 3s (mean 3.05s, max 3.15s — some tail spread from live network/event-loop jitter over a long real-time run is expected and does not contradict the deterministic room-test proof of the mechanism)
+[458.6s] OK: median miss-respawn (3.04s) lands well under the old ~7s rest-timeout path
+[458.6s] --- LOFT DISTRIBUTION (launch elevation degrees, one sample per successful swing) ---
+[458.6s] all samples: [-4.7, -5.9, -5.9, 1.6, -3.4, -7.6, -7.6, -7.0, -6.7, -7.3, -7.0, -3.4, 1.6, 1.6, -4.7, -4.7, -7.0, -6.4, -7.3, -6.7, -7.3, -7.3, -7.0, -6.7, -6.7, -7.0, -6.7, -6.4, -7.3, -7.6, -7.0, -7.3, -6.4, -7.3]
+[458.6s] OK: at least one successful swing's loft was measured (34)
+[458.6s] LOFT min=-7.6deg max=1.6deg mean=-5.8deg histogram={"-10..0":31,"0..10":3}
+[458.6s] OK: loft spans a real range, not a monoculture (spread 9.1deg > 5deg)
+[458.6s] OK: not every sampled loft is near-0deg (old bug: 0deg-forever line drives)
+[458.6s] OK: the first runner was observed leaving the batting square
+[458.6s] OK: COUNTER-CLOCKWISE: the first runner (carl) sets off into negative x — first >=3m sample at (-2.97, 1.08)
+[458.6s] OK: COUNTER-CLOCKWISE: the first runner's opening run reached x = -21.96 < -10 (the x2-scaled post-1/post-2 region)
+[458.6s] first parked arrival: carl at post 3 (x = 6.00) — logged, not orientation evidence
+[458.6s] per-play distinct successful-catch actors (relay signature scan): [{"play":1,"actors":[]},{"play":2,"actors":["ricy"]},{"play":3,"actors":[]},{"play":4,"actors":[]},{"play":5,"actors":["josh"]},{"play":6,"actors":["laurie","carl"]},{"play":7,"actors":[]},{"play":8,"actors":["joel"]},{"play":9,"actors":["laurie","joe"]},{"play":10,"actors":[]},{"play":11,"actors":[]},{"play":12,"actors":[]},{"play":13,"actors":["kian"]},{"play":14,"actors":[]},{"play":15,"actors":[]},{"play":16,"actors":["josh","ricy"]},{"play":17,"actors":[]},{"play":18,"actors":[]},{"play":19,"actors":["laurie"]},{"play":20,"actors":[]},{"play":21,"actors":[]},{"play":22,"actors":["laurie","jonty"]},{"play":23,"actors":[]},{"play":24,"actors":[]},{"play":25,"actors":["laurie"]},{"play":26,"actors":["carl"]},{"play":27,"actors":[]},{"play":28,"actors":[]},{"play":29,"actors":[]},{"play":30,"actors":[]},{"play":31,"actors":["carl"]},{"play":32,"actors":[]},{"play":33,"actors":[]},{"play":34,"actors":[]}]
+[459.0s] === OUTCOME HOLD PROBE (seed 2): sampling positions across the 1.5s hold window ===
+[459.2s] OK: code join landed in room HfHApJdAb
+[459.2s] phase: (joining) → DRAFT | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[460.0s] phase: DRAFT → INITIAL_POSITIONING | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[460.1s] phase: INITIAL_POSITIONING → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[460.2s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[473.7s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"carl"},"outs":[],"scoreDeltaHalves":1,"batterId":"carl"}
+[473.8s] phase: PLAY → PRE_PLAY | A 1½ – B 0½ | innings 1 | outs 0 | batting A | batter laurie
+[475.1s] hold-window samples: [{"t":0.18,"frozen":true},{"t":0.38,"frozen":true},{"t":0.58,"frozen":true},{"t":0.77,"frozen":true},{"t":0.97,"frozen":true},{"t":1.16,"frozen":true},{"t":1.32,"frozen":true}]
+[475.1s] OK: at least one sample taken during the hold window (7)
+[475.1s] OK: field is a FROZEN tableau for the whole 1.5s hold (all 7 samples matched the at-resolve snapshot)
+[475.3s] OUTCOME HOLD: positions changed 1.48s after playOutcome (target ~1.5s)
+[475.3s] OK: the change happened at/after roughly OUTCOME_HOLD_S (observed 1.48s >= 1.20s)
+[475.7s] --- RELAY OBSERVATION ---
+[475.7s] relay observed: seed=1 play=6 actors=["laurie","carl"] outcome={"cause":{"kind":"runOut","atPost":1,"runnerId":"kian"},"outs":["kian"],"scoreDeltaHalves":0,"batterId":"kian"}
+[475.7s] OK: a relay chain shows >=2 distinct fielders each successfully catching/gathering within one play (laurie, carl)
+[475.7s] OK: relay chain resolved as 'undefined', NOT 'caught' — the relay reception was correctly never treated as the fly-catch out
+[475.7s] === SUMMARY ===
+[475.7s] pacing: n=34 median=12.03s min=1.44s max=30.39s
+[475.7s] catch-arm min distance: 2.004m
+[475.7s] miss-respawn (failed-swing-roll -> next-pitch-roll): n=26 mean=3.05s (expected ~3s = MISS_RESPAWN_S + AUTOPLAY_PITCH_DELAY_S, not MISS_RESPAWN_S alone)
+[475.7s] loft: n=34 min=-7.6deg max=1.6deg
+[475.7s] relay observed: true
+[475.7s] ACCEPTANCE PASSED

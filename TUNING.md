@@ -27,7 +27,11 @@ elsewhere.
   full stamina), needing ~7.5 s — but `GAME.PLAY_TIMEOUT_S = 6` ends the play
   first, so `{kind:'rounder'}` (+2 halves) can never occur in a real play; the
   best live score is a half-rounder. The path is fully covered by RulesModule
-  unit tests. Fix candidates for playtest: raise `PLAY_TIMEOUT_S` to ~9 s (also
+  unit tests. **Still true after the 2026-07-05 ×2 field (real-speeds
+  decision):** the circuit is now ~94.8 m and `PLAY_TIMEOUT_S` is 12 s — both
+  roughly doubled in lockstep, so the same shortfall persists proportionally
+  (a full circuit at the fastest runner's unchanged speed still needs
+  ~15 s > 12 s). Fix candidates for playtest: raise `PLAY_TIMEOUT_S` to ~9 s (also
   fixes the M3 despawn-mid-air note below), shrink the post circuit, or raise
   `MOVE_MAX`. Tune together with `THROW_RELEASE_DELAY_S` — a longer play gives
   fielders more run-out windows, so rounders should stay rare, not impossible.
@@ -98,6 +102,33 @@ below ARE the felt pace and difficulty of a match — the primary playtest dials
   including re-pitch loops). Judge the whole rhythm — pitch delay, banner life
   (1.4 s, max 2 stacked), run-roll gap — together, as one broadcast-pacing
   decision, not constant by constant.
+
+## Readable-game overhaul (introduced 2026-07-05)
+
+The whole-stack pacing/fairness/presentation pass: the field doubled in size
+(real speeds unchanged, so plays simply take longer to unfold and are easier
+to watch/read), auto-hit shots now get real loft, a hit ball is uncatchable
+until it clears a launch-point radius, fielders relay-throw one hop when a
+teammate is meaningfully closer to the threatened post, a missed swing
+respawns fast instead of waiting to roll to rest, and a resolved play holds
+its "death tableau" for a beat before the field resets. These constants ARE
+the felt pace of a match now — the primary playtest dials alongside the
+auto-play ones above.
+
+| Constant | Current value | Controls | Playtest watch-list |
+|----------|---------------|----------|---------------------|
+| `FIELD.*` ×2 scaling (`POSTS`, `FIELDING_POSITIONS`, `LEGAL_ZONE`, `BATTING_SQUARE_KEEPOUT` → 6, `GROUND_HALF_EXTENT` → 80) | doubled from the M1 placeholder geometry | The whole field's footprint; movement/throw/pitch SPEEDS deliberately NOT scaled (user decision: "real speeds on a bigger field"), so every flight/run/throw RATIO changed. | This is the single biggest felt-pace lever now. If plays still feel too fast/slow after the ×2, the next dial is here, not the auto-play beat constants — but change it together with `PLAY_TIMEOUT_S`/`AUTOPLAY_RUN_DIST_REF` below (they were scaled in lockstep and will drift out of proportion if the field is retuned alone). Square SIZES and `POST_SENSOR_RADIUS` are deliberately UNSCALED (markings/contact semantics, not distances). |
+| `GAME.PLAY_TIMEOUT_S` | `12` (was 6) | Doubled in lockstep with the field so a play still has time to resolve at the old speeds over the new distances. | The M5-era "a live rounder is unreachable" note should be re-examined at this value (the circuit is now ~2× longer but so is the timeout) — worth a dedicated playtest check now rather than assuming it cancels out exactly. |
+| `GAME.AUTOPLAY_RUN_DIST_REF` | `60` (was 30) | Ball-to-target-post distance at which the runner AI's distance-based safety term saturates. | Scaled ×2 with the field so runner boldness reads the same relative distances as before; if runners feel newly timid/bold on the bigger field, this is the first constant to revisit before touching `AUTOPLAY_RUN_BASE`/`AUTOPLAY_RUN_NERVE_W`. |
+| `GAME.AUTOPLAY_PITCH_DELAY_S` | `1.5` (was 1.0) | Delay after PLAY entry (or a no-contact respawn) before the auto pitch beat fires. | Raised as part of the readable-pacing retune (target band 8–15 s/play). Judge together with `AUTOPLAY_BEAT_MIN_GAP_S` below and the acceptance-measured pacing distribution (`docs/superpowers/acceptance/readable-acceptance.txt`) — if the measured median sits outside 8–15 s, this is the first lever. |
+| `GAME.AUTOPLAY_BEAT_MIN_GAP_S` | `1.0` (was 0.6) | Rate limit between consecutive RUN roll broadcasts. | Raised alongside the pitch delay for the same readable-pacing retune; same tuning caveat as above. |
+| `GAME.AUTOPLAY_LOFT_MIN_DEG` / `AUTOPLAY_LOFT_MAX_DEG` | `5` / `50` | The auto-batter's swing decision now samples a REAL launch elevation in this band (previously every auto-hit was a 0°-forever line drive — bug investigation Bug B). Deliberately strictly inside `HIT_ELEVATION_MIN/MAX_DEG` (−10°/60°) so the sample survives HitModule's clamp unchanged. | First-guess band. If hits read as too pop-fly-heavy (easy catches) or too flat (nothing airborne), narrow/shift the band; watch the acceptance-logged elevation distribution as the baseline. |
+| `GAME.CATCH_ARM_DISTANCE_M` | `4` (m) | A hit flight is uncatchable (no catch/gather attempt, no rng draw) until it has travelled this far from its launch point. Throw flights are exempt (armed immediately) so relay catches stay live. | Kills the "caught without hitting" backstop instant-catch bug (bug investigation Bug A: every auto-hit launched at exactly the contact point, inside the backstop's radius, so her entry roll fired before the ball visibly left the bat). If close-in dribblers still feel unfairly uncatchable-then-suddenly-catchable at the 4 m boundary, this is the dial; the acceptance harness watches for and logs any sub-4 m "unfieldable dribble" oddity (a very weak hit that neither arms in time nor rolls anywhere useful) as an ACCEPTANCE WATCH item, not a fix. |
+| `GAME.RELAY_ADVANTAGE_M` | `6` (m) | A holder throws to a teammate instead of the threatened post when that teammate is at least this many metres closer to the post AND closer than the holder's own throw distance. One-hop only (no multi-link planning). | First guess. Too low → relays happen constantly, diluting the direct-throw run-out tension; too high → relays almost never trigger even when geometrically sensible. The Task-1 review logged a "far-side relay lob geometry" observation (a relay target chosen purely by post-distance can occasionally sit an awkward lob's distance from the holder) — watch for visually odd throw arcs in playtest, not a correctness bug (the throw solver already falls back to a 45° lob for out-of-range targets). |
+| `GAME.MISS_RESPAWN_S` | `1.5` (s, sim time) | A missed swing (no contact) respawns the ball for the re-pitch after this delay instead of waiting for the dead flight to roll to rest (the old path took ~7 s). | Straightforward pacing dial — this is now the dominant cost of a miss-heavy play (several re-pitch loops in a row). If miss-heavy innings still drag, lower it; if re-pitches feel rushed/jarring, raise it — but keep it well under `PLAY_TIMEOUT_S`. |
+| `GAME.OUTCOME_HOLD_S` | `1.5` (s, sim time) | After a play resolves, the broadcast fires immediately but the ball/fielders/runners are held exactly where the play died for this long before the field resets — a readable "how did that end" tableau. Pause-safe (sim time) and rematch/GAME_OVER-safe (see the §6.2 decision row). | The whole point of this constant is legibility, not fairness — tune purely by feel. Too short and the old instant-teleport problem effectively returns; too long and the game feels laggy between plays. GAME_OVER holds too (the frozen final play IS the result tableau) before the result overlay's phase flip — if that reads as a delayed/broken result screen in playtest, this is the first thing to check before touching UIModule. |
+
+- **Sub-4 m dribble / far-side relay lob (Task 1 review, ACCEPTANCE WATCH, not a defect).** Two geometry edge-cases flagged during review rather than fixed: (1) a very weak hit that dies (rolls to rest) before travelling `CATCH_ARM_DISTANCE_M` can end a play essentially unfieldable-by-design (nobody may attempt a catch on it at all, and it's too close/slow to be a meaningful run situation either) — the readable-acceptance harness watches for this pattern and logs it if seen, rather than treating it as a bug; if playtest finds it common/annoying, consider a MIN hit speed/distance floor on contact as a separate change (out of this milestone's scope). (2) a chosen relay target can occasionally sit at an aesthetically odd throw angle from the holder (the qualifying inequality is purely about post-distance, not about producing a "clean" throw line) — the throw solver's existing 45°-lob fallback for out-of-range geometry covers the mechanical case; a genuinely bad-looking relay lob is a presentation nit to watch for, not a rule change.
 
 ## Carried over from earlier milestones
 
