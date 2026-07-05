@@ -30,12 +30,17 @@ const FIELD = {
   BATTING_SQUARE: { x: 0, z: 0 },
   /** Bowler stands here, facing the batter. */
   BOWLING_SQUARE,
-  /** Posts 1–4, run anticlockwise. Placeholder school-rounders layout. */
+  /**
+   * Posts 1–4, run anticlockwise — first post at NEGATIVE x so it appears to
+   * the batter's right from the match camera (screen-right = −x); runners
+   * therefore visibly circle counter-clockwise. Placeholder school-rounders
+   * layout, x-mirrored per the 2026-07-05 auto-play redesign (user-directed).
+   */
   POSTS: [
-    { x: 11, z: 4 },
-    { x: 9, z: 15 },
-    { x: -3, z: 17 },
-    { x: -8.5, z: 6 },
+    { x: -11, z: 4 },
+    { x: -9, z: 15 },
+    { x: 3, z: 17 },
+    { x: 8.5, z: 6 },
   ],
   POST_HEIGHT: 1.2,
   POST_RADIUS: 0.04,
@@ -49,17 +54,18 @@ const FIELD = {
    * Default nine fielding slots (M4 placeholder; real positioning lands in M8).
    * Slot 0 is the bowler (must equal BOWLING_SQUARE), slot 1 the backstop,
    * slots 2–5 mind posts 1–4, and slots 6–8 patrol the deep field.
+   * x-mirrored with POSTS for the counter-clockwise orientation (2026-07-05).
    */
   FIELDING_POSITIONS: [
     BOWLING_SQUARE,
     { x: 0, z: -3 },
-    { x: 12, z: 3 },
-    { x: 10, z: 16 },
-    { x: -4, z: 18 },
-    { x: -9.5, z: 5 },
-    { x: 16, z: 24 },
-    { x: 3, z: 28 },
-    { x: -12, z: 24 },
+    { x: -12, z: 3 },
+    { x: -10, z: 16 },
+    { x: 4, z: 18 },
+    { x: 9.5, z: 5 },
+    { x: -16, z: 24 },
+    { x: -3, z: 28 },
+    { x: 12, z: 24 },
   ],
   /** Rectangular legal fielding area (spec §4); placeholder like the rest of the field geometry. */
   LEGAL_ZONE: { minX: -20, maxX: 20, minZ: -6, maxZ: 32 },
@@ -112,6 +118,20 @@ const GAME = {
   CATCH_HEIGHT_MAX: 2.5,
   /** Seconds a mid-game disconnected player may reconnect before the room disposes. */
   RECONNECT_GRACE_S: 60,
+  /** Sim seconds after PLAY entry (or a no-contact respawn) before the auto pitch beat. */
+  AUTOPLAY_PITCH_DELAY_S: 1.0,
+  /** Minimum sim-second gap between consecutive roll broadcasts (run beats rate-limit). */
+  AUTOPLAY_BEAT_MIN_GAP_S: 0.6,
+  /** Auto-batter timing error is sampled uniform in ±this many seconds. */
+  AUTOPLAY_TIMING_NOISE_S: 0.3,
+  /** Runner AI base go-probability term. */
+  AUTOPLAY_RUN_BASE: 0.3,
+  /** Runner AI nerve-stat weight in the go-probability. */
+  AUTOPLAY_RUN_NERVE_W: 0.3,
+  /** Runner AI risk term when the ball is held by a fielder. */
+  AUTOPLAY_RUN_HELD_RISK: 0.15,
+  /** Ball-to-post distance (m) at which the runner AI's distance risk saturates. */
+  AUTOPLAY_RUN_DIST_REF: 30,
 } as const;
 
 /**

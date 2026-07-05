@@ -169,3 +169,16 @@ export interface SubstituteInput {
 export interface SetBatterInput {
   id: string;
 }
+
+/** One automated contest's dice moment (broadcast as 'roll'). */
+export interface RollEvent {
+  contest: 'pitch' | 'swing' | 'run' | 'catch';
+  actorId: string;
+  /** Short human-readable flavour, e.g. 'spin 8 v read 4'. */
+  detail: string;
+  /** The rng draw in [0,1). */
+  roll: number;
+  /** Success boundary the roll was compared against. */
+  threshold: number;
+  success: boolean;
+}

@@ -171,6 +171,22 @@ describe('constants', () => {
     it('pins the reconnect grace window to 60 s', () => {
       expect(CONST.GAME.RECONNECT_GRACE_S).toBe(60);
     });
+
+    it('pins the auto-play beat delays', () => {
+      expect(CONST.GAME.AUTOPLAY_PITCH_DELAY_S).toBe(1.0);
+      expect(CONST.GAME.AUTOPLAY_BEAT_MIN_GAP_S).toBe(0.6);
+    });
+
+    it('pins the auto-batter timing noise to ±0.3 s', () => {
+      expect(CONST.GAME.AUTOPLAY_TIMING_NOISE_S).toBe(0.3);
+    });
+
+    it('pins the runner AI tunables', () => {
+      expect(CONST.GAME.AUTOPLAY_RUN_BASE).toBe(0.3);
+      expect(CONST.GAME.AUTOPLAY_RUN_NERVE_W).toBe(0.3);
+      expect(CONST.GAME.AUTOPLAY_RUN_HELD_RISK).toBe(0.15);
+      expect(CONST.GAME.AUTOPLAY_RUN_DIST_REF).toBe(30);
+    });
   });
 
   describe('ABILITY — spec §3, §9.9', () => {
@@ -307,6 +323,12 @@ describe('constants', () => {
 
     it('pins the pitching spot to fielding slot 0 (the bowling square)', () => {
       expect(CONST.FIELD.PITCHING_SPOT).toEqual(CONST.FIELD.FIELDING_POSITIONS[0]);
+    });
+
+    it('runs counter-clockwise: first post at negative x, both squares on x = 0', () => {
+      expect(CONST.FIELD.POSTS[0].x).toBeLessThan(0);
+      expect(CONST.FIELD.BATTING_SQUARE.x).toBe(0);
+      expect(CONST.FIELD.BOWLING_SQUARE.x).toBe(0);
     });
   });
 

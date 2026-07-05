@@ -295,12 +295,13 @@ describe('catch evaluation', () => {
 });
 
 describe('held ball and throwing', () => {
-  const HANDS = vec(5, PHYSICS.BALL_RELEASE_HEIGHT, 5);
+  // x mirrored with the 2026-07-05 counter-clockwise field orientation (posts flipped in x).
+  const HANDS = vec(-5, PHYSICS.BALL_RELEASE_HEIGHT, 5);
 
-  /** Catch the ball with Carl at (5, 5) on tick one; returns the harness + module. */
+  /** Catch the ball with Carl at (-5, 5) on tick one; returns the harness + module. */
   function catchWithCarl() {
     const h = makeDeps([0]);
-    const m = createFieldingModule([at(carl, 5, 5)], h.deps);
+    const m = createFieldingModule([at(carl, -5, 5)], h.deps);
     const caught = m.tick(DT, ball(HANDS), true, null);
     expect(caught).toEqual({ kind: 'caught', by: 'carl' });
     return { h, m };
@@ -331,9 +332,9 @@ describe('held ball and throwing', () => {
     expect(t.origin).toEqual(HANDS);
     expect(t.angularVelocity).toEqual(zero);
     expect(len(t.velocity)).toBeCloseTo(pitchSpeed(carl.stats.pitch), 8);
-    // Horizontal direction points at post 2 = (9, 15): (dx, dz) = (4, 10).
-    expect(t.velocity.x / t.velocity.z).toBeCloseTo(4 / 10, 8);
-    expect(t.velocity.x).toBeGreaterThan(0);
+    // Horizontal direction points at post 2 = (-9, 15): (dx, dz) = (-4, 10).
+    expect(t.velocity.x / t.velocity.z).toBeCloseTo(-4 / 10, 8);
+    expect(t.velocity.x).toBeLessThan(0);
     expect(t.velocity.z).toBeGreaterThan(0);
   });
 
@@ -354,7 +355,7 @@ describe('held ball and throwing', () => {
 
   it('while a fielder holds the ball nobody chases it', () => {
     const h = makeDeps([0]);
-    const m = createFieldingModule([at(carl, 5, 5), at(josh, 20, 20)], h.deps);
+    const m = createFieldingModule([at(carl, -5, 5), at(josh, 20, 20)], h.deps);
     m.tick(DT, ball(HANDS), true, null); // Carl catches
     m.tick(DT, ball(HANDS), true, null);
     expect(view(m, 1).x).toBe(20); // Josh does not chase the held ball

@@ -4,6 +4,7 @@ import type {
   PlayOutcome,
   PlayResolution,
   RepositionInput,
+  RollEvent,
   SetBatterInput,
   SetPitcherInput,
   SettlementFact,
@@ -81,5 +82,18 @@ describe('M5 shared contracts (types)', () => {
     const input: SetBatterInput = { id: 'carl' };
     const roundTripped = JSON.parse(JSON.stringify(input)) as SetBatterInput;
     expect(roundTripped).toEqual(input);
+  });
+
+  it('RollEvent shape compiles and round-trips JSON', () => {
+    const event: RollEvent = {
+      contest: 'pitch',
+      actorId: 'kian',
+      detail: 'spin 8 v read 4',
+      roll: 0.42,
+      threshold: 0.6,
+      success: true,
+    };
+    const roundTripped = JSON.parse(JSON.stringify(event)) as RollEvent;
+    expect(roundTripped).toEqual(event);
   });
 });
