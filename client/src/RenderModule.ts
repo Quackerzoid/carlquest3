@@ -328,13 +328,55 @@ export interface FieldersView {
   pickId(raycaster: THREE.Raycaster): string | null;
   /** Mark one fielder (by id) as selected for repositioning, or clear with null. */
   setSelected(id: string | null): void;
+  /**
+   * Plays the bowler's wind-up → release throwing-arm animation on the pitch roll
+   * broadcast (fire-and-forget; the existing rAF loop consumes the flag every frame).
+   * No-op with a console.warn if `id` has no live model (matches markOut's convention —
+   * a genuine ordering surprise, not a normal race, since the pitcher is always on
+   * the field while PLAY is active).
+   */
+  windUp(id: string): void;
   /** Cancels the view's rAF loop and disposes all models. */
   dispose(): void;
 }
 
 interface FielderTarget {
   hasBall: boolean;
+  /** performance.now() timestamp the current wind-up started, or null if not winding up. */
+  windUpStart: number | null;
 }
+
+// ---- Wind-up timing (spec §3: "release coincides with ballLive") ----
+// GAME.AUTOPLAY_PITCH_DELAY_S is 1.0 s: the room broadcasts the pitch `roll` event
+// (which triggers this animation) at PLAY entry, then resolves the actual pitch — and
+// ballLive — 1.0 s later. WIND_UP_DURATION_S is deliberately SHORTER than that gap and
+// ends with a short settle back onto the idle/holder pose: starting the wind-up
+// immediately on the roll broadcast means the release-frame peak (RELEASE_FRACTION
+// through the animation) lands well inside the 1.0 s window, so the arm visibly whips
+// forward and is back at rest by the time the ball is actually live — matching the
+// player's read of "the pitcher just threw it" rather than looking early or late.
+const WIND_UP_DURATION_S = 0.6;
+// Fraction of the animation at which the arm reaches full forward release extension —
+// the back three-fifths is the cocking backswing, the last two-fifths the release snap.
+const WIND_UP_RELEASE_FRACTION = 0.6;
+const WIND_UP_COCK_ANGLE = -2.6; // rad: raised further back than the static HOLDER_ARM_COCK
+const WIND_UP_RELEASE_ANGLE = 1.1; // rad: swung forward past vertical on release
+
+// ---- Batter stance + swing (spec §3: "batting stance holding a bat… hands off to the
+// runner rendering at contact"). The batter always faces +z (towards the bowler at
+// BOWLING_SQUARE — the model's native facing), standing still, so its animation is a
+// lighter dedicated loop rather than the moving-fielder machinery in animateEntry: just
+// idle breathing plus the timed stance/swing pose on the pivots.
+const STANCE_CROUCH = 0.08; // rad forward torso lean — a slight ready crouch
+const STANCE_RIGHT_ARM = -1.05; // rad: right arm raised, bat held up and back
+const STANCE_LEFT_ARM = -0.75; // rad: left arm alongside, both hands towards the bat side
+const SWING_DURATION_S = 0.4;
+// Swing shape: a fast forward sweep (front SWING_CONTACT_FRACTION of the animation) then
+// an easing return to stance — "contact and miss both call it… a miss just follows
+// through" (spec §3), so the sweep always completes the same way regardless of outcome.
+const SWING_CONTACT_FRACTION = 0.45;
+const SWING_ARM_FORWARD = 1.7; // rad: arms swept forward through the hitting zone
+const SWING_TORSO_ROTATE = 0.9; // rad: torso twists into the swing (yaw, about y)
 
 /** Character rig per fielder, keyed by character id; models are added/removed as the roster changes. */
 export function createFieldersView(scene: THREE.Scene): FieldersView {
@@ -347,10 +389,33 @@ export function createFieldersView(scene: THREE.Scene): FieldersView {
 
   const raf = startRafLoop((dt) => {
     clock += dt;
+    const now = performance.now();
     for (const [id, e] of entries) {
       const f = flags.get(id);
       if (!f) continue;
       animateEntry(id, e, dt, f.hasBall);
+
+      // Wind-up overrides the right arm (swing/holder-cock) while active. Progress is
+      // wall-clock-timed from windUpStart rather than an accumulated phase, so the
+      // animation always completes in exactly WIND_UP_DURATION_S regardless of frame
+      // rate (matching the release-timing comment above).
+      if (f.windUpStart !== null) {
+        const t = (now - f.windUpStart) / 1000 / WIND_UP_DURATION_S;
+        if (t >= 1) {
+          f.windUpStart = null; // finished — animateEntry's own pose takes back over next frame
+        } else {
+          const angle =
+            t < WIND_UP_RELEASE_FRACTION
+              ? THREE.MathUtils.lerp(HOLDER_ARM_COCK, WIND_UP_COCK_ANGLE, t / WIND_UP_RELEASE_FRACTION)
+              : THREE.MathUtils.lerp(
+                  WIND_UP_COCK_ANGLE,
+                  WIND_UP_RELEASE_ANGLE,
+                  (t - WIND_UP_RELEASE_FRACTION) / (1 - WIND_UP_RELEASE_FRACTION),
+                );
+          e.model.pose.rightArm.rotation.x = angle;
+        }
+      }
+
       // Status cues (priority selected > holder for the ring; recomputed every frame
       // so any state change restores cleanly). The colour is driven through EMISSIVE
       // with the diffuse zeroed: under the warm stadium light, Lambert diffuse clips
@@ -392,7 +457,7 @@ export function createFieldersView(scene: THREE.Scene): FieldersView {
         }
         let f = flags.get(fielder.id);
         if (!f) {
-          f = { hasBall: false };
+          f = { hasBall: false, windUpStart: null };
           flags.set(fielder.id, f);
         }
         e.target.set(fielder.x, 0, fielder.z);
@@ -422,6 +487,17 @@ export function createFieldersView(scene: THREE.Scene): FieldersView {
     },
     setSelected(id) {
       selected = id;
+    },
+    windUp(id) {
+      const f = flags.get(id);
+      if (!f) {
+        // Matches markOut's convention: this should never happen while PLAY is active
+        // (the pitcher is always a live fielder), so log it as a genuine ordering
+        // surprise rather than silently swallowing it.
+        console.warn(`FieldersView.windUp('${id}'): no live model — animation skipped`);
+        return;
+      }
+      f.windUpStart = performance.now();
     },
     dispose() {
       raf.cancel();
@@ -564,6 +640,127 @@ export function createRunnersView(scene: THREE.Scene): RunnersView {
       for (const e of entries.values()) disposeEntry(scene, groupToId, e);
       entries.clear();
       flags.clear();
+    },
+  };
+}
+
+export interface BatterView {
+  /**
+   * Renders the current batter's rig at the batting square (spec §3). `batterId: null`
+   * hides (and disposes) the model. `suppressed` hides WITHOUT disposing — used while a
+   * runner with the same id already exists on-field (no double render), so the model can
+   * reappear instantly (no rebuild) once the runner settles and the same id bats again.
+   * A kit or id change always disposes and rebuilds.
+   */
+  update(batterId: string | null, kit: KitId, suppressed: boolean): void;
+  /** Plays the bat swing (contact and miss both call it — spec §3); a miss just follows through. */
+  swing(): void;
+  /** Cancels the view's rAF loop and disposes the model. */
+  dispose(): void;
+}
+
+interface BatterEntry {
+  id: string;
+  kit: KitId;
+  model: CharacterModel;
+  breath: number;
+  baseTorsoY: number;
+  /** performance.now() timestamp the current swing started, or null when idle in stance. */
+  swingStart: number | null;
+}
+
+/**
+ * Renders the current batter standing at CONST.FIELD.BATTING_SQUARE facing +z (towards
+ * the bowler — the model's native facing, so no rotation needed), in a batting stance
+ * with the bat prop visible. One model at a time; a change of id or kit disposes and
+ * rebuilds (mirrors rebuildEntryKit's approach in the other views).
+ */
+export function createBatterView(scene: THREE.Scene): BatterView {
+  let entry: BatterEntry | null = null;
+  let hidden = false; // true while suppressed (runner rendering the same id) — model kept, just invisible
+
+  const buildAt = (id: string, kit: KitId): BatterEntry => {
+    const model = buildCharacterModel(charFor(id), kit);
+    const bs = CONST.FIELD.BATTING_SQUARE;
+    model.group.position.set(bs.x, 0, bs.z);
+    model.group.rotation.y = 0; // model faces +z natively — that IS towards the bowler
+    model.bat.visible = true;
+    // Stance: slight crouch, both arms raised towards the bat side (right).
+    model.pose.torso.rotation.x = STANCE_CROUCH;
+    model.pose.rightArm.rotation.x = STANCE_RIGHT_ARM;
+    model.pose.leftArm.rotation.x = STANCE_LEFT_ARM;
+    scene.add(model.group);
+    return {
+      id,
+      kit,
+      model,
+      breath: Math.random() * Math.PI * 2,
+      baseTorsoY: model.pose.torso.position.y,
+      swingStart: null,
+    };
+  };
+
+  const teardown = (): void => {
+    if (!entry) return;
+    scene.remove(entry.model.group);
+    entry.model.dispose();
+    entry = null;
+  };
+
+  const raf = startRafLoop((dt) => {
+    if (!entry || hidden) return;
+    const pose = entry.model.pose;
+    if (entry.swingStart !== null) {
+      const now = performance.now();
+      const t = (now - entry.swingStart) / 1000 / SWING_DURATION_S;
+      if (t >= 1) {
+        // Swing complete — fall through to the exact stance pose below.
+        entry.swingStart = null;
+      } else if (t < SWING_CONTACT_FRACTION) {
+        // Forward sweep: stance → full extension.
+        const p = t / SWING_CONTACT_FRACTION;
+        pose.rightArm.rotation.x = THREE.MathUtils.lerp(STANCE_RIGHT_ARM, SWING_ARM_FORWARD, p);
+        pose.leftArm.rotation.x = THREE.MathUtils.lerp(STANCE_LEFT_ARM, SWING_ARM_FORWARD, p);
+        pose.torso.rotation.y = THREE.MathUtils.lerp(0, SWING_TORSO_ROTATE, p);
+        return;
+      } else {
+        // Follow-through/return: full extension → back to stance (contact and miss
+        // both play this same return — spec §3 "a miss just follows through").
+        const p = (t - SWING_CONTACT_FRACTION) / (1 - SWING_CONTACT_FRACTION);
+        pose.rightArm.rotation.x = THREE.MathUtils.lerp(SWING_ARM_FORWARD, STANCE_RIGHT_ARM, p);
+        pose.leftArm.rotation.x = THREE.MathUtils.lerp(SWING_ARM_FORWARD, STANCE_LEFT_ARM, p);
+        pose.torso.rotation.y = THREE.MathUtils.lerp(SWING_TORSO_ROTATE, 0, p);
+        return;
+      }
+    }
+    // Idle: gentle breathing bob on top of the stance crouch — the batter stands still
+    // throughout a play, so it must never look frozen. Reuses BREATH_FREQ/BREATH_AMP_M
+    // from the fielder/runner idle animation for a consistent "alive" feel.
+    entry.breath += dt * BREATH_FREQ;
+    pose.torso.position.y = entry.baseTorsoY + Math.sin(entry.breath) * BREATH_AMP_M;
+  });
+
+  return {
+    update(batterId, kit, suppressed) {
+      if (batterId === null) {
+        teardown();
+        hidden = false;
+        return;
+      }
+      if (!entry || entry.id !== batterId || entry.kit !== kit) {
+        teardown();
+        entry = buildAt(batterId, kit);
+      }
+      hidden = suppressed;
+      entry.model.group.visible = !hidden;
+    },
+    swing() {
+      if (!entry || hidden) return;
+      entry.swingStart = performance.now();
+    },
+    dispose() {
+      raf.cancel();
+      teardown();
     },
   };
 }

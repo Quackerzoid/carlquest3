@@ -55,6 +55,12 @@ export interface CharacterModel {
   ring: THREE.Mesh;
   /** In-hand ball prop (parented to the right hand); hidden unless the character holds the ball. */
   ball: THREE.Mesh;
+  /**
+   * Rounders bat prop (parented to the right hand, alongside `ball`); hidden by default —
+   * fielders never show it. The batter view (RenderModule Task 4) reveals it for whoever
+   * is currently batting.
+   */
+  bat: THREE.Mesh;
   /** Approximate standing height in metres (whale ≈ 3.1, joe ≈ 1.3) — for camera/tests. */
   height: number;
   /** Emissive traverse tint (out = red); null restores originals. */
@@ -120,6 +126,8 @@ const HEADBAND_COLOUR = 0xf5f2e8;
 const BALL_COLOUR = 0xe8483f; // matches the scene ball
 const RING_COLOUR = 0xd9a441; // default; Task 3 recolours per status
 const EYE_COLOUR = 0x14110d;
+const BAT_BARREL_COLOUR = 0xd7b26a; // pale willow wood
+const BAT_HANDLE_COLOUR = 0x5a4326; // darker taped handle
 
 const DEFAULT_VISUAL: Visual = {
   heightM: 1.7,
@@ -488,6 +496,29 @@ export function buildCharacterModel(character: Character, kit: KitId): Character
   ball.visible = false;
   rightArm.add(ball);
 
+  // In-hand rounders bat — a simple tapered cylinder (barrel, the `bat` mesh itself) with
+  // a slim handle mesh as its child, hanging from the right hand pointing DOWN past the
+  // fingers at rest (the batter view, Task 4, rotates the whole rig into a raised stance).
+  // Hidden by default: fielders never carry it, and the batter view is the only caller
+  // that reveals it.
+  const batHandleLen = 0.28;
+  const batBarrelLen = 0.42;
+  const bat = part(
+    new THREE.CylinderGeometry(0.05, 0.022, batBarrelLen, 10),
+    mat(BAT_BARREL_COLOUR),
+    true,
+  );
+  bat.position.y = -(upperArmLen + lowerArmLen + handR * 0.5 + batHandleLen + batBarrelLen / 2);
+  bat.visible = false;
+  const batHandle = part(
+    new THREE.CylinderGeometry(0.018, 0.022, batHandleLen, 8),
+    mat(BAT_HANDLE_COLOUR),
+    true,
+  );
+  batHandle.position.y = batBarrelLen / 2 + batHandleLen / 2;
+  bat.add(batHandle);
+  rightArm.add(bat);
+
   // ---- Legs: pivot groups AT the hips (children of the ROOT group at y = hipY) so a
   // torso lean does not move the legs. Total leg drop = hipY exactly, so boot soles land
   // on y = 0: upper + lower cover (hipY − bootH) and the boot box fills the last bootH. ----
@@ -572,6 +603,7 @@ export function buildCharacterModel(character: Character, kit: KitId): Character
     pose: { leftArm, rightArm, leftLeg, rightLeg, torso },
     ring,
     ball,
+    bat,
     height: v.heightM,
     setTint,
     dispose,
