@@ -1,0 +1,145 @@
+[0.0s] === ROOM 1 (seed 1): full game to GAME_OVER — the clients only confirm/ready ===
+[0.1s] OK: code join landed in room RnZtUne6I
+[0.2s] phase: (joining) → DRAFT | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[0.8s] phase: DRAFT → INITIAL_POSITIONING | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[0.8s] OK: squad A = carl,laurie,joel,jonty,joe
+[0.8s] OK: squad B = kian,josh,darcy,robbie,ricy
+[0.9s] phase: INITIAL_POSITIONING → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[0.9s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[9.2s] playOutcome→A: {"cause":{"kind":"caught","by":"josh"},"outs":["carl"],"scoreDeltaHalves":0,"batterId":"carl"}
+[9.3s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 1 | batting A | batter laurie
+[9.4s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 1 | batting A | batter laurie
+[17.7s] playOutcome→A: {"cause":{"kind":"caught","by":"josh"},"outs":["laurie"],"scoreDeltaHalves":0,"batterId":"laurie"}
+[17.8s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 2 | batting A | batter joel
+[17.9s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 2 | batting A | batter joel
+[31.0s] playOutcome→A: {"cause":{"kind":"runOut","atPost":3,"runnerId":"joel"},"outs":["joel"],"scoreDeltaHalves":0,"batterId":"joel"}
+[31.0s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 3 | batting A | batter jonty
+[31.2s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 3 | batting A | batter jonty
+[34.4s] playOutcome→A: {"cause":{"kind":"runOut","atPost":1,"runnerId":"jonty"},"outs":["jonty"],"scoreDeltaHalves":0,"batterId":"jonty"}
+[34.5s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 4 | batting A | batter joe
+[34.7s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 4 | batting A | batter joe
+[48.7s] playOutcome→A: {"cause":{"kind":"safe","atPost":1,"runnerId":"joe"},"outs":[],"scoreDeltaHalves":0,"batterId":"joe"}
+[48.7s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 0 | batting B | batter kian
+[48.9s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 0 | batting B | batter kian
+[57.1s] playOutcome→A: {"cause":{"kind":"caught","by":"laurie"},"outs":["kian"],"scoreDeltaHalves":0,"batterId":"kian"}
+[57.1s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 1 | batting B | batter josh
+[57.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 1 | batting B | batter josh
+[65.5s] playOutcome→A: {"cause":{"kind":"caught","by":"laurie"},"outs":["josh"],"scoreDeltaHalves":0,"batterId":"josh"}
+[65.5s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 2 | batting B | batter darcy
+[65.7s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 2 | batting B | batter darcy
+[68.1s] playOutcome→A: {"cause":{"kind":"caught","by":"carl"},"outs":["darcy"],"scoreDeltaHalves":0,"batterId":"darcy"}
+[68.1s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 3 | batting B | batter robbie
+[68.3s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 3 | batting B | batter robbie
+[76.5s] playOutcome→A: {"cause":{"kind":"caught","by":"laurie"},"outs":["robbie"],"scoreDeltaHalves":0,"batterId":"robbie"}
+[76.6s] phase: PLAY → PRE_PLAY | A 0½ – B 0½ | innings 2 | outs 4 | batting B | batter ricy
+[76.8s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 2 | outs 4 | batting B | batter ricy
+[111.9s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"ricy"},"outs":[],"scoreDeltaHalves":1,"batterId":"ricy"}
+[111.9s] phase: PLAY → PRE_PLAY | A 0½ – B 1½ | innings 3 | outs 0 | batting A | batter carl
+[112.1s] phase: PRE_PLAY → PLAY | A 0½ – B 1½ | innings 3 | outs 0 | batting A | batter carl
+[113.6s] playOutcome→A: {"cause":{"kind":"caught","by":"kian"},"outs":["carl"],"scoreDeltaHalves":0,"batterId":"carl"}
+[113.6s] phase: PLAY → PRE_PLAY | A 0½ – B 1½ | innings 3 | outs 1 | batting A | batter laurie
+[113.8s] phase: PRE_PLAY → PLAY | A 0½ – B 1½ | innings 3 | outs 1 | batting A | batter laurie
+[117.6s] playOutcome→A: {"cause":{"kind":"caught","by":"kian"},"outs":["laurie"],"scoreDeltaHalves":0,"batterId":"laurie"}
+[117.6s] phase: PLAY → PRE_PLAY | A 0½ – B 1½ | innings 3 | outs 2 | batting A | batter joel
+[117.8s] phase: PRE_PLAY → PLAY | A 0½ – B 1½ | innings 3 | outs 2 | batting A | batter joel
+[131.8s] playOutcome→A: {"cause":{"kind":"safe","atPost":2,"runnerId":"joel"},"outs":[],"scoreDeltaHalves":1,"batterId":"joel"}
+[131.9s] phase: PLAY → PRE_PLAY | A 1½ – B 1½ | innings 3 | outs 2 | batting A | batter jonty
+[132.0s] phase: PRE_PLAY → PLAY | A 1½ – B 1½ | innings 3 | outs 2 | batting A | batter jonty
+[140.6s] playOutcome→A: {"cause":{"kind":"caught","by":"kian"},"outs":["jonty"],"scoreDeltaHalves":0,"batterId":"jonty"}
+[140.6s] phase: PLAY → PRE_PLAY | A 1½ – B 1½ | innings 3 | outs 3 | batting A | batter joe
+[140.8s] phase: PRE_PLAY → PLAY | A 1½ – B 1½ | innings 3 | outs 3 | batting A | batter joe
+[147.8s] playOutcome→A: {"cause":{"kind":"safe","atPost":1,"runnerId":"joe"},"outs":[],"scoreDeltaHalves":0,"batterId":"joe"}
+[147.8s] phase: PLAY → PRE_PLAY | A 1½ – B 1½ | innings 3 | outs 3 | batting A | batter joel
+[148.0s] phase: PRE_PLAY → PLAY | A 1½ – B 1½ | innings 3 | outs 3 | batting A | batter joel
+[151.6s] playOutcome→A: {"cause":{"kind":"runOut","atPost":2,"runnerId":"joe"},"outs":["joe"],"scoreDeltaHalves":0,"batterId":"joel"}
+[151.6s] phase: PLAY → PRE_PLAY | A 1½ – B 1½ | innings 4 | outs 0 | batting B | batter kian
+[151.8s] phase: PRE_PLAY → PLAY | A 1½ – B 1½ | innings 4 | outs 0 | batting B | batter kian
+[176.8s] playOutcome→A: {"cause":{"kind":"runOut","atPost":2,"runnerId":"kian"},"outs":["kian"],"scoreDeltaHalves":0,"batterId":"kian"}
+[176.9s] phase: PLAY → PRE_PLAY | A 1½ – B 1½ | innings 4 | outs 1 | batting B | batter josh
+[177.0s] phase: PRE_PLAY → PLAY | A 1½ – B 1½ | innings 4 | outs 1 | batting B | batter josh
+[180.8s] playOutcome→A: {"cause":{"kind":"safe","atPost":1,"runnerId":"josh"},"outs":[],"scoreDeltaHalves":0,"batterId":"josh"}
+[180.8s] phase: PLAY → PRE_PLAY | A 1½ – B 1½ | innings 4 | outs 1 | batting B | batter darcy
+[181.0s] phase: PRE_PLAY → PLAY | A 1½ – B 1½ | innings 4 | outs 1 | batting B | batter darcy
+[188.0s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"darcy"},"outs":[],"scoreDeltaHalves":1,"batterId":"darcy"}
+[188.0s] phase: PLAY → PRE_PLAY | A 1½ – B 2½ | innings 4 | outs 1 | batting B | batter robbie
+[188.2s] phase: PRE_PLAY → PLAY | A 1½ – B 2½ | innings 4 | outs 1 | batting B | batter robbie
+[196.8s] playOutcome→A: {"cause":{"kind":"caught","by":"joel"},"outs":["robbie"],"scoreDeltaHalves":0,"batterId":"robbie"}
+[196.8s] phase: PLAY → PRE_PLAY | A 1½ – B 2½ | innings 4 | outs 2 | batting B | batter ricy
+[197.0s] phase: PRE_PLAY → PLAY | A 1½ – B 2½ | innings 4 | outs 2 | batting B | batter ricy
+[203.9s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"ricy"},"outs":[],"scoreDeltaHalves":1,"batterId":"ricy"}
+[203.9s] phase: PLAY → PRE_PLAY | A 1½ – B 3½ | innings 4 | outs 2 | batting B | batter josh
+[204.1s] phase: PRE_PLAY → PLAY | A 1½ – B 3½ | innings 4 | outs 2 | batting B | batter josh
+[205.3s] playOutcome→A: {"cause":{"kind":"caught","by":"laurie"},"outs":["josh"],"scoreDeltaHalves":0,"batterId":"josh"}
+[205.4s] phase: PLAY → PRE_PLAY | A 1½ – B 3½ | innings 4 | outs 3 | batting B | batter darcy
+[205.5s] phase: PRE_PLAY → PLAY | A 1½ – B 3½ | innings 4 | outs 3 | batting B | batter darcy
+[212.5s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"darcy"},"outs":[],"scoreDeltaHalves":1,"batterId":"darcy"}
+[212.5s] phase: PLAY → PRE_PLAY | A 1½ – B 4½ | innings 4 | outs 3 | batting B | batter ricy
+[212.7s] phase: PRE_PLAY → PLAY | A 1½ – B 4½ | innings 4 | outs 3 | batting B | batter ricy
+[213.9s] playOutcome→A: {"cause":{"kind":"caught","by":"laurie"},"outs":["ricy"],"scoreDeltaHalves":0,"batterId":"ricy"}
+[213.9s] phase: PLAY → GAME_OVER | A 1½ – B 4½ | innings 4 | outs 4 | batting B | batter 
+[214.1s] GAME_OVER after 24 plays | A 1½ – B 4½ | winner B
+[214.1s] OK: a real game unfolded (24 plays ≥ 10)
+[214.1s] OK: definite winner ('B')
+[214.1s] OK: winner strictly outscores the loser (4 > 1 half-rounders)
+[214.1s] OK: playOutcome broadcast per resolved play (24 for 24 plays)
+[214.1s] OK: ZERO play messages sent by either client all game (no 'plays resolve automatically' rejection ever received)
+[214.1s] OK: no rejection of ANY kind during the hands-off game
+[214.1s] OK: play 1: roll sequence sane (6 rolls: {"pitch":2,"swing":2,"run":1,"catch":1})
+[214.1s] OK: play 2: roll sequence sane (6 rolls: {"pitch":2,"swing":2,"run":1,"catch":1})
+[214.1s] OK: play 3: roll sequence sane (7 rolls: {"pitch":2,"swing":2,"run":2,"catch":1})
+[214.1s] OK: play 4: roll sequence sane (6 rolls: {"pitch":1,"swing":1,"run":1,"catch":3})
+[214.1s] OK: play 5: roll sequence sane (7 rolls: {"pitch":2,"swing":2,"run":2,"catch":1})
+[214.1s] OK: play 6: roll sequence sane (6 rolls: {"pitch":2,"swing":2,"run":1,"catch":1})
+[214.1s] OK: play 7: roll sequence sane (6 rolls: {"pitch":2,"swing":2,"run":1,"catch":1})
+[214.1s] OK: play 8: roll sequence sane (6 rolls: {"pitch":1,"swing":1,"run":1,"catch":3})
+[214.1s] OK: play 9: roll sequence sane (6 rolls: {"pitch":2,"swing":2,"run":1,"catch":1})
+[214.1s] OK: play 10: roll sequence sane (13 rolls: {"pitch":5,"swing":5,"run":1,"catch":2})
+[214.1s] OK: play 11: roll sequence sane (4 rolls: {"pitch":1,"swing":1,"run":1,"catch":1})
+[214.1s] OK: play 12: roll sequence sane (6 rolls: {"pitch":1,"swing":1,"run":1,"catch":3})
+[214.1s] OK: play 13: roll sequence sane (7 rolls: {"pitch":2,"swing":2,"run":2,"catch":1})
+[214.1s] OK: play 14: roll sequence sane (6 rolls: {"pitch":2,"swing":2,"run":1,"catch":1})
+[214.1s] OK: play 15: roll sequence sane (4 rolls: {"pitch":1,"swing":1,"run":1,"catch":1})
+[214.1s] OK: play 16: roll sequence sane (5 rolls: {"pitch":1,"swing":1,"run":1,"catch":2})
+[214.1s] OK: play 17: roll sequence sane (11 rolls: {"pitch":4,"swing":4,"run":1,"catch":2})
+[214.1s] OK: play 18: roll sequence sane (7 rolls: {"pitch":1,"swing":1,"run":1,"catch":4})
+[214.1s] OK: play 19: roll sequence sane (4 rolls: {"pitch":1,"swing":1,"run":1,"catch":1})
+[214.1s] OK: play 20: roll sequence sane (7 rolls: {"pitch":2,"swing":2,"run":1,"catch":2})
+[214.1s] OK: play 21: roll sequence sane (4 rolls: {"pitch":1,"swing":1,"run":1,"catch":1})
+[214.1s] OK: play 22: roll sequence sane (4 rolls: {"pitch":1,"swing":1,"run":1,"catch":1})
+[214.1s] OK: play 23: roll sequence sane (4 rolls: {"pitch":1,"swing":1,"run":1,"catch":1})
+[214.1s] OK: play 24: roll sequence sane (4 rolls: {"pitch":1,"swing":1,"run":1,"catch":1})
+[214.1s] OK: roll broadcasts arrived for every beat (146 total: {"pitch":41,"swing":41,"run":27,"catch":37})
+[214.1s] OK: every play carried at least one pitch and one swing roll
+[214.1s] OK: runner-AI run rolls were broadcast
+[214.1s] OK: the first runner was observed leaving the batting square
+[214.1s] OK: COUNTER-CLOCKWISE: the first runner (joel) sets off into negative x — first ≥3 m sample at (-2.86, 1.04)
+[214.1s] OK: COUNTER-CLOCKWISE: the first runner's opening run reached x = -10.97 < −5 (the post-1/post-2 region)
+[214.1s] first parked arrival: joel at post 2 (x = -9.00) — logged, not orientation evidence
+[214.4s] === ROOM 2 (seed 2): tombstone rejections + pause/reconnect ===
+[214.4s] OK: code join landed in room IBhOSDYVN
+[214.5s] phase: (joining) → DRAFT | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[215.1s] phase: DRAFT → INITIAL_POSITIONING | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[215.1s] OK: squad A = carl,laurie,joel,jonty,joe
+[215.1s] OK: squad B = kian,josh,darcy,robbie,ricy
+[215.2s] phase: INITIAL_POSITIONING → PRE_PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[215.2s] phase: PRE_PLAY → PLAY | A 0½ – B 0½ | innings 1 | outs 0 | batting A | batter carl
+[216.2s] tombstone probe: fielding side B sends pitch
+[216.2s] rejected→B: {"message":"pitch","phase":"PLAY","reason":"plays resolve automatically"}
+[216.2s] OK: pitch rejected with exactly 'plays resolve automatically' (got 'plays resolve automatically')
+[216.2s] tombstone probe: batting side A sends swing
+[216.2s] rejected→A: {"message":"swing","phase":"PLAY","reason":"plays resolve automatically"}
+[216.2s] OK: swing rejected with exactly 'plays resolve automatically' (got 'plays resolve automatically')
+[216.2s] tombstone probe: batting side A sends runDecision
+[216.2s] rejected→A: {"message":"runDecision","phase":"PLAY","reason":"plays resolve automatically"}
+[216.3s] OK: runDecision rejected with exactly 'plays resolve automatically' (got 'plays resolve automatically')
+[216.5s] OK: auto-play continued past the tombstone probes
+[216.5s] B raw WebSocket closed (non-consented drop)
+[216.5s] paused with 3 rolls broadcast; ball at x=0.0937 z=-0.0745
+[217.7s] OK: NO roll broadcast across 1.2 s paused (still 3)
+[217.7s] OK: ball frozen while paused
+[217.7s] OK: pause held
+[217.8s] B reconnected: sessionId=9h_6gQEli
+[223.5s] playOutcome→A: {"cause":{"kind":"safe","atPost":3,"runnerId":"carl"},"outs":[],"scoreDeltaHalves":1,"batterId":"carl"}
+[223.5s] phase: PLAY → PRE_PLAY | A 1½ – B 0½ | innings 1 | outs 0 | batting A | batter laurie
+[223.5s] OK: dice resumed after reconnect (phase PRE_PLAY)
+[223.8s] ACCEPTANCE PASSED (both rooms)

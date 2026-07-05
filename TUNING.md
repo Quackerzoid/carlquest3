@@ -78,6 +78,27 @@ elsewhere.
   silently flip those tests before it flips gameplay — re-derive the test
   offsets alongside any timing-window retune.
 
+## Auto-play redesign (introduced 2026-07-05)
+
+Plays now resolve as server dice beats (no player play-messages), so the values
+below ARE the felt pace and difficulty of a match — the primary playtest dials.
+
+| Constant | Current value | Controls | Playtest watch-list |
+|----------|---------------|----------|---------------------|
+| `GAME.AUTOPLAY_PITCH_DELAY_S` | `1.0` (s, sim time) | Delay after PLAY entry (or a no-contact respawn) before the auto pitch beat fires. | The match's breathing room: long enough to read the previous roll banner, short enough that a missed-swing re-pitch loop doesn't drag. If spectating feels rushed, raise toward 1.5; if plays with several misses feel dead, lower the RESPAWN case specifically (would need a second constant). |
+| `GAME.AUTOPLAY_BEAT_MIN_GAP_S` | `0.6` (s, sim time) | Rate limit between consecutive RUN roll broadcasts (decisions still apply when the broadcast is suppressed). | Presentation-only. Too low → banner spam during multi-runner cascades; too high → runs feel undecided. Tune against the 1.4 s banner life (2 max stacked). |
+| `GAME.AUTOPLAY_TIMING_NOISE_S` | `0.3` (s) | The auto-batter's swing timing error is sampled uniform in ±this; contact iff the error lands inside the batter's REAL effective window (the full resolveSwing chain — reflex, CANNON_ARM, spin-read, pressure). | The single biggest game-pace dial: at 0.3 a mid-reflex batter connects roughly every other pitch. Lower → more contact, faster innings, abilities that shrink windows matter less; higher → miss-heavy, slower games. Retune alongside `TIMING_W` only — the window chain itself is shared with the formulas. |
+| `GAME.AUTOPLAY_RUN_BASE` | `0.3` | Runner AI base term in `pGo = clamp01(BASE + safety01·0.5 + NERVE_W·s01(nerve))`. | The floor of runner boldness. If runners feel suicidal into held balls, lower; if innings stall on timid runners, raise. |
+| `GAME.AUTOPLAY_RUN_NERVE_W` | `0.3` | Weight of the runner's nerve stat in `pGo`. | Differentiates the roster: at 0.3 the nerve-1→10 spread is 27 percentage points of go-probability. Raise to make nerve a defining stat, lower if low-nerve characters never advance. |
+| `GAME.AUTOPLAY_RUN_HELD_RISK` | `0.15` | The (low) fixed SAFETY value used while a fielder holds the ball — it replaces the distance-based safety term, so a held ball contributes only `0.15·0.5` to `pGo`. | Too high → runners sprint into held-ball run-outs constantly; too low (with a low BASE) → the game freezes whenever the ball is gathered. Tune together with `THROW_RELEASE_DELAY_S` (the actual run-out window). |
+| `GAME.AUTOPLAY_RUN_DIST_REF` | `30` (m) | Ball-to-target-post distance at which the distance-based safety term saturates at 1 (`safety01 = clamp01(dist / REF)` — a FAR ball means a SAFE run). | Roughly the deep-field-to-post throw. If runners won't go on mid-field balls, lower it (mid distances read safer); if they run into close balls too readily, raise. |
+
+- **Beat pacing overall:** a resolved play currently runs ~4–12 s (pitch delay +
+  flight + running + rolls; live acceptance: a 24-play game in ~3.5 min
+  including re-pitch loops). Judge the whole rhythm — pitch delay, banner life
+  (1.4 s, max 2 stacked), run-roll gap — together, as one broadcast-pacing
+  decision, not constant by constant.
+
 ## Carried over from earlier milestones
 
 - **Max-power hit vs `PLAY_TIMEOUT_S` (M3).** A max-power 60°-elevation hit flies

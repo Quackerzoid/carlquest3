@@ -1,0 +1,27 @@
+[3.8s] OK: 4-letter room code displayed (got 'MLNH')
+[6.8s] page 1 reached DRAFT
+[7.2s] page 2 reached DRAFT
+[37.7s] OK: table-order draft clicked (carl,kian,laurie,josh,joel,darcy,jonty,robbie,joe,ricy)
+[37.9s] both pages at INITIAL_POSITIONING
+[37.9s] OK: fielding legend carries the orbit hint ('[Enter] confirm/ready[N] rematchclick fielder → click ground · Esc clear · drag to orbit · wheel to zoom · Home resets')
+[37.9s] OK: fielding legend carries the reposition hint
+[37.9s] OK: no retired play keys in the legend
+[56.8s] OK: orbit drag changed the rendered view
+[63.1s] OK: no selection-ring pixels at the click target before the move (0)
+[65.7s] clicked panel row for fielder 'josh'
+[68.0s] 'josh' shows [selected] off the reposition patch — schema move accepted
+[68.8s] OK: reposition from the orbited camera not rejected (feed: [])
+[73.4s] OK: selection-ring pixels present at the click target after the move (13)
+[79.3s] phase PLAY — hands off, watching
+[80.6s] OK: PLAY legend ('[Enter] confirm/ready[N] rematchplay in progress — the dice decide')
+[82.2s] roll banner captured (pinned clone of the first real banner)
+[84.5s] mid-run frame captured (requested at the connect banner)
+[86.3s] OK: roll banners observed (3): ["pitchKian pitches — spin 9- (0.76) — keeps it straight","swingCarl swings — timing +0.091s v window 0.174s — connects!","runCarl on the paths — ball 12.5m off — goes!"]
+[86.5s] OK: never more than 2 banners stacked
+[86.6s] OK: play resolved with zero client play messages ('Carl safe at post 3 · +1½')
+[99.2s] second PLAY — close-up burst from the orbited page 2
+[108.1s] wind-up burst captured (frames a–h, one per ~1 s capture — covers pre-pitch, whip and any re-pitch)
+[110.0s] PRE_PLAY batter close-up captured from the orbited camera
+[110.0s] OK: zero page errors on page 1 ([])
+[110.0s] OK: zero page errors on page 2 ([])
+[110.1s] BROWSER ACCEPTANCE PASSED

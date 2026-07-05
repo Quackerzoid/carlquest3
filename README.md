@@ -2,20 +2,22 @@
 
 A 2-player online 3D rounders game. One player creates a match and shares a
 4-letter code; the other joins, you draft your squads from the shared character
-pool, and play a full game of school-rules rounders — pitching, batting,
-fielder positioning, substitutions, character abilities, innings, tiebreaks and
-rematches — over a server-authoritative connection.
+pool, and manage a full game of school-rules rounders — fielder positioning,
+batting order, bowler nomination, substitutions, character abilities, innings,
+tiebreaks and rematches — over a server-authoritative connection. The plays
+themselves resolve automatically as **visible dice rolls**: every pitch, swing,
+run and catch is a stat-weighted contest that flashes up as a roll banner.
 
 Built with **TypeScript (strict)**, **Three.js** (rendering), **Rapier**
 (physics), **Colyseus** (authoritative multiplayer server) and **Vite**.
 
-| The stadium | Mid-play |
+| The dice decide | The wind-up |
 |---|---|
-| ![The stadium — stands, crowd, floodlights, striped grass, and the fielding side taking position](docs/superpowers/acceptance/visual-01-stadium.png) | ![Mid-play — a navy kit-A runner between posts while the maroon kit-B side fields](docs/superpowers/acceptance/visual-02-lineup.png) |
+| ![Mid-play — pitch, swing and run roll banners flash over the field while the navy runner rounds the posts](docs/superpowers/acceptance/autoplay-02-roll-banner.png) | ![The bowler mid wind-up, ball just released, the batter waiting with the bat — the pitch roll banner above](docs/superpowers/acceptance/autoplay-05-windup-a.png) |
 
-| Holding the ball | Result screen |
+| The draft sheet | The lobby |
 |---|---|
-| ![The bowler holds the gathered ball — gold holder ring at his feet, the Whale looming top-left](docs/superpowers/acceptance/visual-03-play.png) | ![Game over — final score, winner and rematch](docs/superpowers/acceptance/m10-03-result-overlay.png) |
+| ![The broadcast-styled draft sheet — one row per character with the full stat line and ability tag](docs/superpowers/acceptance/autoplay-01b-draft.png) | ![Create a match — glass slab lobby card with the shareable 4-letter code](docs/superpowers/acceptance/autoplay-01a-lobby.png) |
 
 ## Quick start (one machine, two tabs)
 
@@ -37,23 +39,28 @@ Open `http://localhost:5173` in two browser tabs. In tab 1 click
 
 ## How to play
 
-The game is keyboard-driven during play; the on-screen key legend always shows
-exactly the keys available to *you* in the current phase.
+You are the **manager, not the player**: you draft the squad, set the field,
+pick the batting order and nominate the bowler — then the play itself resolves
+automatically as **visible dice rolls**. Every pitch, swing, run decision and
+catch attempt flashes up as a roll banner (and lands on the event feed), so you
+watch your decisions pay off contest by contest. The on-screen legend always
+shows exactly the actions available to *you* in the current phase.
 
 | Phase | You do |
 |---|---|
 | Draft | Click a character row on your turn (5 picks each) |
 | Positioning / pre-play | `Enter` to confirm/ready. Fielding side: click your fielder, then click the ground to reposition (`Esc` clears); nominate your bowler and make substitutions from the panel. Batting side: click a queue row to choose the next batter |
-| Play — batting | `Space` swing · `R` run · `T` stop |
-| Play — fielding | `A`/`S`/`D` set spin · `P` pitch |
+| Play | Hands off — the dice decide. Watch the roll banners |
+| Any time | Drag to orbit the camera · mouse wheel to zoom · `Home` resets the view |
 | Game over | `N` or the on-screen button to rematch |
 
 Scoring is school rules: reach the 2nd post on your own hit for a
 **half-rounder**, complete the circuit for a **rounder**; caught balls and
 run-outs end the batter; five outs end the innings; ties go to sudden-death.
 Every character has an ability (the bracketed tag on their draft card) that
-genuinely changes play — Kian's curveball bends late, the Whale stops any ball
-that hits him dead, Jonty never drops a catch, Joe fumbles 35% of his. Each of
+genuinely changes the dice — Kian's curveball bends late, the Whale stops any
+ball that hits him dead, Jonty never drops a catch (his rolls are guaranteed),
+Joe fumbles 35% of his. Each of
 the eleven has a distinct look on the field to match — the Whale is a 3.1 m
 giant, Joe a 1.3 m scrawn in a shirt two sizes too big.
 
@@ -187,7 +194,8 @@ between friends but do on a public server:
 ## Development commands
 
 - `npm run dev` — client + server in watch mode
-- `npm run check` — typecheck + lint + full test suite (all workspaces; 357 tests)
+- `npm run check` — typecheck + lint + full test suite (all workspaces; 380
+  tests — allow ~12 minutes: the room tests watch real-time auto-play beats)
 - `npm run test` — Vitest only
 - `npm run build` — production client build (server build wiring is a known
   open item; production uses `tsx`)
