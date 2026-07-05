@@ -892,7 +892,13 @@ export class MatchRoom extends Room<MatchState> {
       this.ready = { A: false, B: false };
       this.syncRulesView();
       // PLAY entered: schedule the auto pitch beat on SIM time (pause-safe —
-      // simTime freezes while paused, so the beat freezes with it).
+      // simTime freezes while paused, so the beat freezes with it). Both sides
+      // CAN ready during the previous play's outcome hold (the phase mirror
+      // syncs at resolve time), and that is safe for ANY values of the
+      // constants — not a PITCH_DELAY_S == OUTCOME_HOLD_S coincidence: the
+      // tick's finalise gate sits BEFORE the beat check and returns until
+      // finalisePlay has run, so however early this beat is scheduled it
+      // cannot fire before the field is respawned and rebuilt.
       if (this.phase() === 'PLAY') {
         this.pitchBeatAt = this.simTime + GAME.AUTOPLAY_PITCH_DELAY_S;
       }

@@ -100,10 +100,11 @@ export interface FieldingModule {
    * first ball snapshot far enough from the origin arms the flight for good,
    * so a ball that later rolls back near the launch point is still fieldable.
    * Throw flights (applyThrow) never call this and are armed immediately —
-   * relay catches stay live. reset() clears any pending origin.
+   * relay catches stay live. Arming a fresh hit flight also clears the
+   * thrown-flight tag (see thrownFlight). reset() clears any pending origin.
    */
   armFlight(origin: Vec3): void;
-  /** Back to setup positions and stat stamina; holder, hold timer, roll latches, arming origin and the fumbled-flight flag cleared. */
+  /** Back to setup positions and stat stamina; holder, hold timer, roll latches, arming origin and the fumbled/thrown-flight flags cleared. */
   reset(): void;
 }
 
@@ -186,6 +187,21 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
    * as never-bounced and hand out a wrongful pre-bounce out.
    */
   let fumbledFlight = false;
+  /**
+   * Thrown-flight guard (2026-07-05 relay-reception fix; same shape as
+   * fumbledFlight above): true from the module's own applyThrow release until
+   * a NEW hit flight arms (armFlight) or reset(). Spec §8's pre-bounce
+   * `caught` out is about the BATTER's struck ball — catching a teammate's
+   * throw is a reception, not a dismissal — but the room binds applyThrow to
+   * physics.applyPitch, whose placeBall resets the bounce flag, so a flat
+   * relay dart genuinely arrives "never bounced" and deps.hasBounced() alone
+   * classified a won reception as `caught`, wrongfully outing the batter.
+   * While thrownFlight is true, every won attempt classifies gathered, never
+   * caught. This closes the §6.4 thrown-ball item and, for THROWN flights,
+   * its WALL 2.5–2.6 m band-edge cousin (a dart stopped dead by the blocker
+   * above catch height can no longer manufacture a `caught` on the drop).
+   */
+  let thrownFlight = false;
   /**
    * Catch-arming origin (2026-07-05): non-null while the current HIT flight is
    * still within CATCH_ARM_DISTANCE_M of its launch point — every catch/gather
@@ -417,7 +433,7 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
           const bouncedBeforePark = deps.hasBounced();
           deps.holdBallAt(hands); // park immediately so physics cannot fly the ball onwards
           event =
-            bouncedBeforePark || fumbledFlight
+            bouncedBeforePark || fumbledFlight || thrownFlight
               ? { kind: 'gathered', by: f.character.id }
               : { kind: 'caught', by: f.character.id };
         }
@@ -461,6 +477,7 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
           const velocity = throwVelocity(hands, target, pitchSpeed(f.character.stats.pitch));
           if (velocity !== null) {
             deps.applyThrow({ origin: hands, velocity, angularVelocity: { x: 0, y: 0, z: 0 } });
+            thrownFlight = true; // this flight is a throw: any pickup is a reception (see the flag)
             f.hasBall = false;
             f.stamina = Math.max(0, f.stamina - GAME.THROW_STAMINA_COST);
             holder = null;
@@ -493,6 +510,7 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
 
     armFlight(origin) {
       unarmedOrigin = { x: origin.x, y: origin.y, z: origin.z }; // defensive copy
+      thrownFlight = false; // a fresh HIT flight: pre-bounce catches are outs again
     },
 
     reset() {
@@ -507,6 +525,7 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
       holder = null;
       holdTime = 0;
       fumbledFlight = false;
+      thrownFlight = false;
       unarmedOrigin = null;
     },
   };

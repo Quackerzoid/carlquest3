@@ -497,6 +497,89 @@ describe('relay throws (2026-07-05 readable-game overhaul)', () => {
     expect(Math.abs(t.velocity.x)).toBeLessThan(1e-8);
     expect(t.velocity.z).toBeGreaterThan(0);
   });
+
+  describe('thrown-flight classification (the §6.4 thrown-ball pre-bounce caught fix)', () => {
+    // Room stub coupling (the fumbledFlight coupled test's idiom, extended to
+    // throws): the room binds holdBallAt to physics.spawnBall AND applyThrow
+    // to physics.applyPitch — BOTH route through placeBall, which RESETS the
+    // bounce flag. A flat relay dart therefore genuinely arrives "pre-bounce"
+    // at the receiver, so deps.hasBounced() alone classified a won reception
+    // as `caught` — and MatchRoom turns any `caught` into the batter
+    // dismissed. The module's own thrownFlight tag must close the trap.
+    function coupleThrowsToBounce(h: ReturnType<typeof makeDeps>) {
+      const record = h.deps.applyThrow;
+      h.deps.applyThrow = (p) => {
+        h.bounced.value = false; // exactly what applyPitch → placeBall does
+        record(p);
+      };
+      const parkAndReset = h.deps.holdBallAt;
+      h.deps.holdBallAt = (p) => {
+        h.bounced.value = false; // spawnBall → placeBall too
+        parkAndReset(p);
+      };
+    }
+
+    it('a successful relay reception is GATHERED, never caught, and the relay CHAIN continues (re-throw next hold cycle)', () => {
+      // The relay geometry from the qualifier test: carl holds 30 m south of
+      // post 3, josh sits well inside RELAY_ADVANTAGE_M of it — the throw
+      // targets josh's hands, and his won reception must be a reception
+      // (gathered), NOT a `caught` dismissal of the batter.
+      const h = makeDeps([0, 0]); // carl's catch, then josh's reception
+      coupleThrowsToBounce(h);
+      const m = createFieldingModule([at(carl, post3.x, 4), at(josh, post3.x + 4, post3.z - 1)], h.deps);
+      const hands = vec(post3.x, PHYSICS.BALL_RELEASE_HEIGHT, 4);
+      expect(m.tick(DT, ball(hands), true, null)).toEqual({ kind: 'caught', by: 'carl' });
+      expect(m.tick(0.25, ball(hands), true, 3)).toBeNull(); // 0.25 s held
+      expect(m.tick(0.25, ball(hands), true, 3)).toEqual({ kind: 'thrown', by: 'carl', atPost: 3 });
+      // The dart arrives at josh's LIVE (post-cover-move) hands, never having
+      // bounced — the coupled stubs report exactly what the physics would.
+      expect(h.bounced.value).toBe(false);
+      const josh1 = m.getFielders().find((f) => f.id === 'josh');
+      if (josh1 === undefined) throw new Error('no josh view');
+      const reception = m.tick(DT, ball(vec(josh1.x, PHYSICS.BALL_RELEASE_HEIGHT, josh1.z)), true, 3);
+      expect(reception).toEqual({ kind: 'gathered', by: 'josh' }); // NEVER 'caught' off a throw
+      expect(m.holderId()).toBe('josh');
+      // Chain continues: josh (QUICK_DRAW: halved release delay = 0.25 s)
+      // re-throws at the threatened post on the next hold cycle. Carl is 26+ m
+      // away, so no relay qualifies — the re-throw is direct at post 3.
+      const josh2 = m.getFielders().find((f) => f.id === 'josh');
+      if (josh2 === undefined) throw new Error('no josh view');
+      const rethrow = m.tick(0.25, ball(vec(josh2.x, PHYSICS.BALL_RELEASE_HEIGHT, josh2.z)), true, 3);
+      expect(rethrow).toEqual({ kind: 'thrown', by: 'josh', atPost: 3 });
+      expect(h.throws).toHaveLength(2);
+    });
+
+    it('armFlight (a fresh HIT flight) clears the thrown tag: a new pre-bounce catch is caught again', () => {
+      const h = makeDeps([0, 0]);
+      coupleThrowsToBounce(h);
+      const m = createFieldingModule([at(carl, post3.x, 4)], h.deps);
+      const hands = vec(post3.x, PHYSICS.BALL_RELEASE_HEIGHT, 4);
+      m.tick(DT, ball(hands), true, null); // caught (roll 1)
+      m.tick(0.25, ball(hands), true, 3);
+      m.tick(0.25, ball(hands), true, 3); // thrown (single fielder: direct)
+      m.tick(DT, ball(vec(100, 1, 100)), true, null); // ball far out: clears carl's entry latch
+      m.armFlight(vec(0, 0.6, 0)); // a NEW hit flight arms — the thrown tag dies with the old flight
+      // Carl chased a little towards the far ball; his spot is ≥ 4 m from the
+      // arming origin, so the flight is armed and the fresh entry rolls.
+      const f = view(m);
+      const event = m.tick(DT, ball(vec(f.x, PHYSICS.BALL_RELEASE_HEIGHT, f.z)), true, null);
+      expect(event).toEqual({ kind: 'caught', by: 'carl' }); // roll 2 — a real out again
+      expect(h.rngCallCount()).toBe(2);
+    });
+
+    it('reset() clears the thrown tag: a fresh pre-bounce catch is caught again', () => {
+      const h = makeDeps([0, 0]);
+      coupleThrowsToBounce(h);
+      const m = createFieldingModule([at(carl, post3.x, 4)], h.deps);
+      const hands = vec(post3.x, PHYSICS.BALL_RELEASE_HEIGHT, 4);
+      m.tick(DT, ball(hands), true, null); // caught
+      m.tick(0.25, ball(hands), true, 3);
+      m.tick(0.25, ball(hands), true, 3); // thrown
+      m.reset();
+      const event = m.tick(DT, ball(hands), true, null);
+      expect(event).toEqual({ kind: 'caught', by: 'carl' });
+    });
+  });
 });
 
 describe('reset', () => {
