@@ -5,6 +5,11 @@
  * fielder with fumbleChance > 0 (BUTTERFINGERS) makes ONE EXTRA fumble roll
  * immediately after a won (or guaranteed) attempt — fumbleChance = 0 fielders
  * never make that extra call, so neutral call counts are unchanged from M4.
+ * 2026-07-05 readable-game overhaul: while a hit flight is UNARMED (within
+ * CATCH_ARM_DISTANCE_M of its armFlight origin) NO attempt happens at all,
+ * i.e. zero rng draws, until the flight has travelled the arm distance
+ * (one-way). Throw flights never call armFlight, so their counts are
+ * unchanged.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -156,26 +161,30 @@ describe('role assignment', () => {
 
   it('cover moves to the runner target post offset towards their own position; holds when no runner', () => {
     const { deps } = makeDeps();
-    const m = createFieldingModule([at(carl, 0.5, 10), at(josh, 10, 17)], deps);
-    // Post 3 is at (-3, 17); Josh approaches from +x, so his target is (-2.5, 17).
+    // Post 3 is at (6, 34) on the x2 field; Josh approaches from +x along the
+    // post's own z, so his target is (6.5, 34) and his movement is pure -x.
+    const post3 = FIELD.POSTS[2];
+    if (post3 === undefined) throw new Error('no post 3');
+    const joshStartX = post3.x + 10;
+    const m = createFieldingModule([at(carl, 0.5, 10), at(josh, joshStartX, post3.z)], deps);
     m.tick(DT, rolling(0, 10), true, 3);
     const cover = view(m, 1);
-    expect(cover.x).toBeCloseTo(10 - moveSpeed(josh.stats.speed, 1) * DT, 8);
-    expect(cover.z).toBeCloseTo(17, 8);
+    expect(cover.x).toBeCloseTo(joshStartX - moveSpeed(josh.stats.speed, 1) * DT, 8);
+    expect(cover.z).toBeCloseTo(post3.z, 8);
 
     const { deps: deps2 } = makeDeps();
-    const m2 = createFieldingModule([at(carl, 0.5, 10), at(josh, 10, 17)], deps2);
+    const m2 = createFieldingModule([at(carl, 0.5, 10), at(josh, joshStartX, post3.z)], deps2);
     m2.tick(DT, rolling(0, 10), true, null);
-    expect(view(m2, 1).x).toBe(10); // nobody between posts → no cover
+    expect(view(m2, 1).x).toBe(joshStartX); // nobody between posts → no cover
   });
 
   it('cover snaps to rest exactly POST_SENSOR_RADIUS short of the post', () => {
     const { deps } = makeDeps();
-    const m = createFieldingModule([at(carl, 0.5, 10), at(josh, 10, 17)], deps);
-    for (let i = 0; i < 40; i++) m.tick(0.1, rolling(0, 10), true, 3);
-    const cover = view(m, 1);
     const post3 = FIELD.POSTS[2];
     if (post3 === undefined) throw new Error('no post 3');
+    const m = createFieldingModule([at(carl, 0.5, 10), at(josh, post3.x + 10, post3.z)], deps);
+    for (let i = 0; i < 40; i++) m.tick(0.1, rolling(0, 10), true, 3);
+    const cover = view(m, 1);
     expect(cover.x).toBe(post3.x + FIELD.POST_SENSOR_RADIUS); // straight-line approach along +x
     expect(cover.z).toBe(post3.z);
   });
@@ -333,8 +342,10 @@ describe('held ball and throwing', () => {
     expect(t.origin).toEqual(HANDS);
     expect(t.angularVelocity).toEqual(zero);
     expect(len(t.velocity)).toBeCloseTo(pitchSpeed(carl.stats.pitch), 8);
-    // Horizontal direction points at post 2 = (-9, 15): (dx, dz) = (-4, 10).
-    expect(t.velocity.x / t.velocity.z).toBeCloseTo(-4 / 10, 8);
+    // Horizontal direction points at post 2 (single fielder — no relay candidates).
+    const post2 = FIELD.POSTS[1];
+    if (post2 === undefined) throw new Error('no post 2');
+    expect(t.velocity.x / t.velocity.z).toBeCloseTo((post2.x - HANDS.x) / (post2.z - HANDS.z), 8);
     expect(t.velocity.x).toBeLessThan(0);
     expect(t.velocity.z).toBeGreaterThan(0);
   });
@@ -361,6 +372,130 @@ describe('held ball and throwing', () => {
     m.tick(DT, ball(HANDS), true, null);
     expect(view(m, 1).x).toBe(20); // Josh does not chase the held ball
     expect(view(m, 1).z).toBe(20);
+  });
+});
+
+describe('catch arming (2026-07-05 readable-game overhaul)', () => {
+  // The bug-investigation repro: every auto hit used to launch at 0° from
+  // ~(0, 0.6, 0) already INSIDE the backstop's catch radius, so the pCatch
+  // roll fired on the contact tick and the batter died at the batting square.
+  const LAUNCH = vec(0, 0.6, 0);
+
+  it('a flight is uncatchable at its launch point: no event and NO rng draw (backstop contact-tick repro)', () => {
+    const h = makeDeps([0]); // would be a guaranteed win if it were ever rolled
+    const m = createFieldingModule([at(carl, 0, 0)], h.deps);
+    m.armFlight(LAUNCH);
+    // Ball in carl's hands, 0.4 m from the launch point — well under the arm distance.
+    expect(m.tick(DT, ball(vec(0, PHYSICS.BALL_RELEASE_HEIGHT, 0)), true, null)).toBeNull();
+    expect(h.rngCallCount()).toBe(0); // suppressed attempt = suppressed draw
+    expect(m.holderId()).toBeNull();
+    // Still unarmed on a later tick; gathers are suppressed too.
+    h.bounced.value = true;
+    expect(m.tick(DT, rolling(0.5, 0.5), true, null)).toBeNull();
+    expect(h.rngCallCount()).toBe(0);
+  });
+
+  it('the flight arms once the ball is CATCH_ARM_DISTANCE_M from launch: normal one-roll attempt', () => {
+    const h = makeDeps([0]);
+    const m = createFieldingModule([at(carl, 4.5, 0)], h.deps);
+    m.armFlight(LAUNCH);
+    // hypot(4.5, 0.4) ≈ 4.52 m from the launch point — armed; ball in carl's hands.
+    const event = m.tick(DT, ball(vec(4.5, PHYSICS.BALL_RELEASE_HEIGHT, 0)), true, null);
+    expect(event).toEqual({ kind: 'caught', by: 'carl' });
+    expect(h.rngCallCount()).toBe(1);
+  });
+
+  it('arming is ONE-WAY: after the flight has been far enough out, a ball back near launch is attempted', () => {
+    const h = makeDeps([0]);
+    const m = createFieldingModule([at(carl, 0, 0)], h.deps);
+    m.armFlight(LAUNCH);
+    // Tick 1: the ball is 10 m out (arms the flight) but outside carl's radius — no attempt yet.
+    expect(m.tick(DT, ball(vec(10, PHYSICS.BALL_RELEASE_HEIGHT, 0)), true, null)).toBeNull();
+    expect(h.rngCallCount()).toBe(0);
+    // Tick 2: the ball is back at carl's hands, within 4 m of the ORIGIN — but
+    // the flight armed for good, so the entry rolls normally.
+    const f = view(m); // carl chased a little towards the tick-1 gather point
+    const event = m.tick(DT, ball(vec(f.x, PHYSICS.BALL_RELEASE_HEIGHT, f.z)), true, null);
+    expect(event).toEqual({ kind: 'caught', by: 'carl' });
+    expect(h.rngCallCount()).toBe(1);
+  });
+
+  it('flights that never call armFlight (throws) are armed immediately', () => {
+    // The room only arms HIT flights; applyThrow flights never see armFlight,
+    // so a relay catch right next to the thrower stays live. Structurally this
+    // is the module's default state — pinned here so it cannot silently invert.
+    const h = makeDeps([0]);
+    const m = createFieldingModule([at(carl, 0, 0)], h.deps);
+    const event = m.tick(DT, ball(vec(0, PHYSICS.BALL_RELEASE_HEIGHT, 0)), true, null);
+    expect(event).toEqual({ kind: 'caught', by: 'carl' });
+    expect(h.rngCallCount()).toBe(1);
+  });
+
+  it('reset() clears a pending arming origin', () => {
+    const h = makeDeps([0]);
+    const m = createFieldingModule([at(carl, 0, 0)], h.deps);
+    m.armFlight(LAUNCH);
+    m.reset();
+    const event = m.tick(DT, ball(vec(0, PHYSICS.BALL_RELEASE_HEIGHT, 0)), true, null);
+    expect(event).toEqual({ kind: 'caught', by: 'carl' });
+    expect(h.rngCallCount()).toBe(1);
+  });
+});
+
+describe('relay throws (2026-07-05 readable-game overhaul)', () => {
+  const post3 = FIELD.POSTS[2]; // (6, 34) on the x2 field
+  if (post3 === undefined) throw new Error('no post 3');
+
+  /** Drive a catch → hold → throw at `targetPost`; returns harness, module and the throw params. */
+  function throwFrom(setup: FielderSetup[], hands: Vec3, targetPost: number) {
+    const h = makeDeps([0]);
+    const m = createFieldingModule(setup, h.deps);
+    expect(m.tick(DT, ball(hands), true, null)).toEqual({ kind: 'caught', by: setup[0]?.character.id });
+    expect(m.tick(0.25, ball(hands), true, targetPost)).toBeNull(); // 0.25 s held
+    const event = m.tick(0.25, ball(hands), true, targetPost); // 0.5 s: release
+    expect(h.throws).toHaveLength(1);
+    const t = h.throws[0];
+    if (t === undefined) throw new Error('no throw recorded');
+    return { h, m, t, event };
+  }
+
+  it('a qualifying relay fielder is targeted instead of the post; the nearest-to-post qualifier wins', () => {
+    // Carl holds 30 m south of post 3; josh AND ricy both sit RELAY_ADVANTAGE_M+
+    // closer to the post. Josh (the nearer of the two) covers the post during
+    // the hold ticks, so the throw must point at HIS live position, not the
+    // post (direct would be pure +z from this geometry) and not ricy.
+    const hands = vec(post3.x, PHYSICS.BALL_RELEASE_HEIGHT, 4);
+    const { m, t, event } = throwFrom(
+      [at(carl, post3.x, 4), at(josh, post3.x + 4, post3.z - 1), at(getCharacter('ricy'), post3.x - 4, post3.z - 4)],
+      hands,
+      3,
+    );
+    expect(event).toEqual({ kind: 'thrown', by: 'carl', atPost: 3 }); // event still names the threatened post
+    expect(len(t.velocity)).toBeCloseTo(pitchSpeed(carl.stats.pitch), 8);
+    const joshView = m.getFielders().find((f) => f.id === 'josh');
+    if (joshView === undefined) throw new Error('no josh view');
+    // Direct at the post would be exactly +z (vx = 0); the relay points at josh.
+    expect(t.velocity.x).toBeGreaterThan(0);
+    expect(t.velocity.x / t.velocity.z).toBeCloseTo(
+      (joshView.x - hands.x) / (joshView.z - hands.z),
+      8,
+    );
+  });
+
+  it('no qualifier (teammate less than RELAY_ADVANTAGE_M closer) → direct throw at the post, unchanged', () => {
+    // Carl holds 6 m from the post; josh can never get 6 m closer than that
+    // (his best is the 0.5 m cover spot → 6.5 > 6), so the throw stays direct.
+    const hands = vec(post3.x, PHYSICS.BALL_RELEASE_HEIGHT, post3.z - 6);
+    const { t } = throwFrom([at(carl, post3.x, post3.z - 6), at(josh, post3.x, post3.z - 2.5)], hands, 3);
+    expect(Math.abs(t.velocity.x)).toBeLessThan(1e-8); // pure +z: aimed at the post itself
+    expect(t.velocity.z).toBeGreaterThan(0);
+  });
+
+  it('the holder himself is excluded: standing nearest the post still throws direct', () => {
+    const hands = vec(post3.x, PHYSICS.BALL_RELEASE_HEIGHT, post3.z - 2);
+    const { t } = throwFrom([at(carl, post3.x, post3.z - 2), at(josh, 30, 5)], hands, 3);
+    expect(Math.abs(t.velocity.x)).toBeLessThan(1e-8);
+    expect(t.velocity.z).toBeGreaterThan(0);
   });
 });
 

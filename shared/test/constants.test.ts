@@ -138,8 +138,8 @@ describe('constants', () => {
       expect(CONST.GAME.PITCH_ELEVATION_MAX_DEG).toBe(20);
     });
 
-    it('pins demo play-end tunables', () => {
-      expect(CONST.GAME.PLAY_TIMEOUT_S).toBe(6);
+    it('pins demo play-end tunables (PLAY_TIMEOUT_S doubled with the x2 field, 2026-07-05)', () => {
+      expect(CONST.GAME.PLAY_TIMEOUT_S).toBe(12);
       expect(CONST.GAME.BALL_REST_SPEED).toBe(0.1);
       expect(CONST.GAME.BALL_REST_TIME_S).toBe(1);
     });
@@ -172,20 +172,35 @@ describe('constants', () => {
       expect(CONST.GAME.RECONNECT_GRACE_S).toBe(60);
     });
 
-    it('pins the auto-play beat delays', () => {
-      expect(CONST.GAME.AUTOPLAY_PITCH_DELAY_S).toBe(1.0);
-      expect(CONST.GAME.AUTOPLAY_BEAT_MIN_GAP_S).toBe(0.6);
+    it('pins the auto-play beat delays (readable-pacing values, 2026-07-05)', () => {
+      expect(CONST.GAME.AUTOPLAY_PITCH_DELAY_S).toBe(1.5);
+      expect(CONST.GAME.AUTOPLAY_BEAT_MIN_GAP_S).toBe(1.0);
     });
 
     it('pins the auto-batter timing noise to ±0.3 s', () => {
       expect(CONST.GAME.AUTOPLAY_TIMING_NOISE_S).toBe(0.3);
     });
 
-    it('pins the runner AI tunables', () => {
+    it('pins the runner AI tunables (RUN_DIST_REF doubled with the x2 field, 2026-07-05)', () => {
       expect(CONST.GAME.AUTOPLAY_RUN_BASE).toBe(0.3);
       expect(CONST.GAME.AUTOPLAY_RUN_NERVE_W).toBe(0.3);
       expect(CONST.GAME.AUTOPLAY_RUN_HELD_RISK).toBe(0.15);
-      expect(CONST.GAME.AUTOPLAY_RUN_DIST_REF).toBe(30);
+      expect(CONST.GAME.AUTOPLAY_RUN_DIST_REF).toBe(60);
+    });
+
+    it('pins the readable-game overhaul tunables (2026-07-05 design spec Part 1)', () => {
+      expect(CONST.GAME.AUTOPLAY_LOFT_MIN_DEG).toBe(5);
+      expect(CONST.GAME.AUTOPLAY_LOFT_MAX_DEG).toBe(50);
+      expect(CONST.GAME.CATCH_ARM_DISTANCE_M).toBe(4);
+      expect(CONST.GAME.RELAY_ADVANTAGE_M).toBe(6);
+      expect(CONST.GAME.MISS_RESPAWN_S).toBe(1.5);
+      expect(CONST.GAME.OUTCOME_HOLD_S).toBe(1.5);
+    });
+
+    it('keeps the loft band inside the HitModule elevation clamp (the sampled loft survives normalisation)', () => {
+      expect(CONST.GAME.AUTOPLAY_LOFT_MIN_DEG).toBeGreaterThan(CONST.GAME.HIT_ELEVATION_MIN_DEG);
+      expect(CONST.GAME.AUTOPLAY_LOFT_MAX_DEG).toBeLessThan(CONST.GAME.HIT_ELEVATION_MAX_DEG);
+      expect(CONST.GAME.AUTOPLAY_LOFT_MIN_DEG).toBeLessThan(CONST.GAME.AUTOPLAY_LOFT_MAX_DEG);
     });
   });
 
@@ -316,9 +331,26 @@ describe('constants', () => {
       }
     });
 
-    it('pins the batting-square keep-out radius to 3 m and requires it positive', () => {
-      expect(CONST.FIELD.BATTING_SQUARE_KEEPOUT).toBe(3);
+    it('pins the batting-square keep-out radius to 6 m (x2 field, 2026-07-05) and requires it positive', () => {
+      expect(CONST.FIELD.BATTING_SQUARE_KEEPOUT).toBe(6);
       expect(CONST.FIELD.BATTING_SQUARE_KEEPOUT).toBeGreaterThan(0);
+    });
+
+    it('pins the x2 field geometry (2026-07-05 readable-game overhaul): posts, bowling square, legal zone, ground', () => {
+      expect(CONST.FIELD.POSTS).toEqual([
+        { x: -22, z: 8 },
+        { x: -18, z: 30 },
+        { x: 6, z: 34 },
+        { x: 17, z: 12 },
+      ]);
+      expect(CONST.FIELD.BOWLING_SQUARE).toEqual({ x: 0, z: 15 });
+      expect(CONST.FIELD.BATTING_SQUARE).toEqual({ x: 0, z: 0 }); // origin unmoved
+      expect(CONST.FIELD.LEGAL_ZONE).toEqual({ minX: -40, maxX: 40, minZ: -12, maxZ: 64 });
+      expect(CONST.FIELD.GROUND_HALF_EXTENT).toBe(80);
+      // Square SIZES are markings, not distances — unscaled. Sensor semantics unchanged.
+      expect(CONST.FIELD.BATTING_SQUARE_SIZE).toBe(2);
+      expect(CONST.FIELD.BOWLING_SQUARE_SIZE).toBe(2.5);
+      expect(CONST.FIELD.POST_SENSOR_RADIUS).toBe(0.5);
     });
 
     it('pins the pitching spot to fielding slot 0 (the bowling square)', () => {

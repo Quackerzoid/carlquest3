@@ -153,6 +153,25 @@ export class MatchRoom extends Room<MatchState> {
   private autoPlay!: ReturnType<typeof createAutoPlayModule>;
   /** Sim-time at which the next auto pitch beat fires; null = none scheduled. */
   private pitchBeatAt: number | null = null;
+  /**
+   * Sim-time at which a missed swing's ball respawns for the re-pitch
+   * (2026-07-05 readable-game overhaul): set when the pre-sampled swing
+   * resolves as a miss, so the re-pitch loop no longer waits ~7 s for the
+   * dead flight to roll to rest. Rest/timeout stays as the fallback for
+   * flights that never cross the plane. Null = none pending.
+   */
+  private missRespawnAt: number | null = null;
+  /**
+   * Outcome hold (2026-07-05 readable-game overhaul): pending finalisation of
+   * a resolved play. resolvePlayNow() broadcasts the resolution and freezes
+   * the world; finalisePlay() (ball respawn, fielding reset/rebuild, syncs)
+   * runs OUTCOME_HOLD_S sim-seconds later from tick — clients get a readable
+   * tableau of how the play died instead of an instant whole-field teleport.
+   * Sim-time based, so pause freezes the hold; handleRematch and onDispose
+   * clear it (their own resets supersede the finalisation).
+   */
+  private pendingFinalise: { at: number; inningsChanged: boolean; contextChanged: boolean } | null =
+    null;
   /** Swing decision pre-sampled at the pitch beat, applied at the plane crossing. */
   private pendingSwing: PendingSwing | null = null;
   /** Sim-time of the last broadcast run RollEvent (AUTOPLAY_BEAT_MIN_GAP_S rate limit). */
@@ -428,6 +447,10 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   override onDispose(): void {
+    // A pending outcome-hold finalisation dies with the room (the simulation
+    // interval is torn down with disposal; this is belt-and-braces so nothing
+    // can ever fire it against disposed physics).
+    this.pendingFinalise = null;
     this.physics.dispose();
   }
 
@@ -679,6 +702,7 @@ export class MatchRoom extends Room<MatchState> {
    */
   private autoPitch(): void {
     this.pitchBeatAt = null;
+    this.missRespawnAt = null; // defensive: a fresh flight owns its own miss timer
     const pitcher = getCharacter(this.state.currentPitcherId);
     // M9: the pitcher's ability mods shape the pitch (CANNON_ARM speed,
     // CURVEBALL_MASTER spin/onset) and are held for the coming swing's context
@@ -739,8 +763,18 @@ export class MatchRoom extends Room<MatchState> {
       pressure,
     });
     this.broadcast('roll', { ...pending.roll, success: result.contact });
-    if (!result.contact) return;
+    if (!result.contact) {
+      // Missed swing (2026-07-05): don't watch the dead flight roll to rest —
+      // schedule the fast respawn. The tick's no-contact branch fires it.
+      this.missRespawnAt = this.simTime + GAME.MISS_RESPAWN_S;
+      return;
+    }
     this.physics.applyHit(result.params);
+    // Catch arming (2026-07-05): the hit is applied at the ball's current
+    // position, which IS the launch point — arm the flight so no fielder can
+    // catch it until it has travelled CATCH_ARM_DISTANCE_M (kills the
+    // backstop contact-tick instant catch; see FieldingModule.armFlight).
+    this.fielding.armFlight(this.physics.getBallState().position);
     this.running.startRun(batter);
     this.contactMade = true;
     // applyHit cleared the crossing latches; seed lastExposedPosts with the new
@@ -904,6 +938,11 @@ export class MatchRoom extends Room<MatchState> {
     this.lastExposedPosts = new Set();
     this.pitchBeatAt = null;
     this.pendingSwing = null;
+    this.missRespawnAt = null;
+    // Rematch during the GAME_OVER outcome hold: this handler's own full reset
+    // supersedes the pending finalisation — clear it so finalisePlay never
+    // fires over the fresh match state (2026-07-05 outcome hold).
+    this.pendingFinalise = null;
     this.lastAtPost.clear();
     this.lastRunRollAt = -Infinity;
     this.state.lastOutcome = '';
@@ -921,6 +960,14 @@ export class MatchRoom extends Room<MatchState> {
     // Clamp to avoid a spiral-of-death catch-up burst after an event-loop stall.
     const dt = Math.min(deltaMs / 1000, PHYSICS.SIM_MAX_CATCHUP);
     this.simTime += dt;
+    // Outcome hold (2026-07-05): between resolvePlayNow and finalisePlay the
+    // world is a frozen tableau — no physics step, no beats, no syncs; the
+    // schema keeps the exact positions the play died with. Sim-time based,
+    // so a pause freezes the hold along with everything else.
+    if (this.pendingFinalise !== null) {
+      if (this.simTime >= this.pendingFinalise.at) this.finalisePlay();
+      return;
+    }
     // Auto pitch beat: fires only in PLAY with no live ball, when its sim-time
     // is due (pause freezes simTime, so beats freeze automatically).
     if (
@@ -976,22 +1023,29 @@ export class MatchRoom extends Room<MatchState> {
       const atRest = this.updateRestTracking(state);
       const resolved = this.resolveOutcome(fieldingEvent, atRest, crossedSnapshot);
       if (resolved !== null) {
-        this.endPlay(resolved);
+        this.resolvePlayNow(resolved);
       } else {
         // Run beats: every post arrival re-rolls the shared go/stay decision.
         if (this.detectArrivals()) this.autoRunBeat();
         this.syncRunners();
         this.syncFielders();
       }
-    } else if (this.updateRestTracking(state)) {
+    } else if (
+      (this.missRespawnAt !== null && this.simTime >= this.missRespawnAt) ||
+      this.updateRestTracking(state)
+    ) {
       // No contact this play (un-hit pitch or a missed swing): quietly respawn
       // and stay in PLAY — no play resolution — and RE-SCHEDULE the pitch beat
-      // so the auto re-pitch loop never stalls.
+      // so the auto re-pitch loop never stalls. A resolved MISS fires the fast
+      // MISS_RESPAWN_S timer (2026-07-05 — the old path watched the dead ball
+      // roll to rest for ~7 s); rest/timeout remains the fallback for flights
+      // that never cross the plane.
       this.state.ballLive = false;
       this.physics.spawnBall();
       this.syncBall(); // the schema must show the parked ball, not the dead flight's last state
       this.restSince = null;
       this.pendingSwing = null;
+      this.missRespawnAt = null;
       this.pitchBeatAt = this.simTime + GAME.AUTOPLAY_PITCH_DELAY_S;
     }
   }
@@ -1108,16 +1162,23 @@ export class MatchRoom extends Room<MatchState> {
   }
 
   /**
-   * Settle the play: mark the out runner (caught batter / run-out) so settlePlay
-   * removes them, gather per-runner facts, then let RulesModule resolve scoring,
-   * outs, batter rotation and phase. Broadcast/sync the resolution. running.reset()
-   * is called ONLY when the innings context changes (innings switch, tiebreak, or
-   * game over) — otherwise parked survivors persist into the next play.
+   * Resolve the play NOW (2026-07-05 outcome-hold split of the old endPlay):
+   * mark the out runner (caught batter / run-out) so settlePlay removes them,
+   * gather per-runner facts, let RulesModule resolve scoring/outs/rotation/
+   * phase, then broadcast + mirror the resolution and schedule finalisePlay()
+   * for OUTCOME_HOLD_S sim-seconds later. Everything PRESENTATIONAL (ball
+   * respawn, fielding reset/rebuild, runner/fielder schema syncs) is deferred
+   * to finalisePlay so clients see the tableau of how the play died. The
+   * PHASE mirror syncs HERE, at resolve time (deliberate, per the plan): the
+   * schema stays honest — rules.resolvePlay has already flipped the phase —
+   * and the tableau is about POSITIONS, not phase; a GAME_OVER overlay
+   * appearing over the frozen final play IS the tableau.
    */
-  private endPlay(resolved: Resolved): void {
+  private resolvePlayNow(resolved: Resolved): void {
     // M8 stamina ledger: absorb the played module's drained values FIRST (the
-    // fielding state is still the module that just played), then everyone NOT on
-    // the fielding field regains bench stamina, capped at stat (spec §4).
+    // fielding state is still the module that just played — it stays untouched
+    // through the hold, no ticks run), then everyone NOT on the fielding field
+    // regains bench stamina, capped at stat (spec §4).
     for (const f of this.fielding.getFielders()) this.staminaById.set(f.id, f.stamina);
     const onField = new Set(this.fielding.getFielders().map((f) => f.id));
     for (const [id, s] of this.staminaById) {
@@ -1133,16 +1194,12 @@ export class MatchRoom extends Room<MatchState> {
     const prevInnings = this.rules.view().inningsIndex;
     const resolution = this.rules.resolvePlay(resolved.cause, facts);
 
+    // The play is over: kill the live flags so no further beats/fielding run,
+    // but leave the BALL and the runner/fielder SCHEMA exactly as they died —
+    // finalisePlay repaints them after the hold.
     this.state.ballLive = false;
     this.contactMade = false;
     this.physics.clearBlocker(WALL_FIELDER_ID); // WALL is per live post-contact ball (M9)
-    this.physics.spawnBall();
-    // Re-sync the parked ball: syncBall only runs while the ball is live, so
-    // without this the schema advertises the DEAD flight's final state all the
-    // way through PRE_PLAY — stale for clients, and a trap for tests sampling
-    // ball velocity at a play boundary (found by the Task-3 CLUTCH probe).
-    this.syncBall();
-    this.fielding.reset();
     this.restSince = null;
     this.lastExposedPosts = new Set();
     this.confirmed = { A: false, B: false };
@@ -1150,6 +1207,7 @@ export class MatchRoom extends Room<MatchState> {
     // Auto-play beat state is per play; the next handleReadyForPlay re-arms it.
     this.pitchBeatAt = null;
     this.pendingSwing = null;
+    this.missRespawnAt = null;
     this.lastAtPost.clear();
     this.lastRunRollAt = -Infinity;
 
@@ -1157,8 +1215,12 @@ export class MatchRoom extends Room<MatchState> {
       // Defensive: resolvePlay only returns null out of PLAY / with no batter,
       // neither of which should reach here. Log, clear runners, rebuild fielding
       // (the stamina ledger absorb above already ran; without a rebuild the stale
-      // module would regress the ledger by one play on the next absorb), and recover.
+      // module would regress the ledger by one play on the next absorb), and
+      // recover SYNCHRONOUSLY — no outcome hold for a play that has no outcome.
       console.error('[MatchRoom] resolvePlay returned null unexpectedly');
+      this.physics.spawnBall();
+      this.syncBall();
+      this.fielding.reset();
       this.running.reset();
       this.rebuildFielding();
       this.syncRulesView();
@@ -1171,22 +1233,46 @@ export class MatchRoom extends Room<MatchState> {
     this.broadcast('playOutcome', resolution);
 
     const v = this.rules.view();
-    if (v.phase === 'GAME_OVER' || v.inningsIndex !== prevInnings || v.tiebreak) {
+    // Resolve-time phase/score sync (see the method doc); position syncs wait.
+    this.syncRulesView();
+    this.pendingFinalise = {
+      at: this.simTime + GAME.OUTCOME_HOLD_S,
+      inningsChanged: v.inningsIndex !== prevInnings,
+      contextChanged: v.phase === 'GAME_OVER' || v.inningsIndex !== prevInnings || v.tiebreak,
+    };
+  }
+
+  /**
+   * Finalise a resolved play OUTCOME_HOLD_S after resolvePlayNow (2026-07-05):
+   * ball respawned + re-synced (syncBall only runs while the ball is live, so
+   * without this the schema advertises the DEAD flight's final state all the
+   * way through PRE_PLAY — the M3-era trap, still real), fielding reset,
+   * runners cleared ONLY when the innings context changed (innings switch,
+   * tiebreak, or game over — otherwise parked survivors persist into the next
+   * play), per-innings sub caps reset, schema repainted, and the on-field five
+   * rebuilt (M7: the play may have switched the fielding side; the pitcher
+   * resets to the new side's default. Same-side rebuilds are equivalent to
+   * the fielding.reset() — fresh module, same setup, same nominated pitcher).
+   */
+  private finalisePlay(): void {
+    const pending = this.pendingFinalise;
+    if (pending === null) return;
+    this.pendingFinalise = null;
+
+    this.physics.spawnBall();
+    this.syncBall();
+    this.fielding.reset();
+    if (pending.contextChanged) {
       this.running.reset(); // innings switch / tiebreak / game over: no parked carry-over
     }
-    if (v.inningsIndex !== prevInnings) {
+    if (pending.inningsChanged) {
       // Substitution caps are per innings (spec §4); layouts and bench persist.
       this.positioning?.A.resetSubs();
       this.positioning?.B.resetSubs();
       this.syncPositioning();
     }
-    this.syncRulesView();
     this.syncRunners();
     this.syncFielders();
-    // M7: the play may have switched the fielding side (innings switch / tiebreak
-    // flip); rebuild the on-field five from the new side's squad, resetting the
-    // pitcher to that side's default. Same-side rebuilds are equivalent to the
-    // fielding.reset() above (fresh module, same setup, same nominated pitcher).
     this.rebuildFielding();
   }
 

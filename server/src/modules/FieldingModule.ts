@@ -91,7 +91,19 @@ export interface FieldingModule {
   ): FieldingEvent | null;
   getFielders(): FielderView[];
   holderId(): string | null;
-  /** Back to setup positions and stat stamina; holder, hold timer, roll latches and the fumbled-flight flag cleared. */
+  /**
+   * Catch arming (2026-07-05 readable-game overhaul; same family as the WALL
+   * flight-start exemption): the room calls this at bat contact with the hit's
+   * launch position. Until the ball has travelled CATCH_ARM_DISTANCE_M from
+   * that origin, NO catch/gather attempt happens — and no rng is drawn (the
+   * call-count contract in the test header). The exemption is ONE-WAY: the
+   * first ball snapshot far enough from the origin arms the flight for good,
+   * so a ball that later rolls back near the launch point is still fieldable.
+   * Throw flights (applyThrow) never call this and are armed immediately —
+   * relay catches stay live. reset() clears any pending origin.
+   */
+  armFlight(origin: Vec3): void;
+  /** Back to setup positions and stat stamina; holder, hold timer, roll latches, arming origin and the fumbled-flight flag cleared. */
   reset(): void;
 }
 
@@ -174,6 +186,14 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
    * as never-bounced and hand out a wrongful pre-bounce out.
    */
   let fumbledFlight = false;
+  /**
+   * Catch-arming origin (2026-07-05): non-null while the current HIT flight is
+   * still within CATCH_ARM_DISTANCE_M of its launch point — every catch/gather
+   * attempt (and its rng draw) is suppressed until then. Cleared one-way the
+   * first tick the ball is far enough out (see armFlight's interface doc), by
+   * reset(), and never set for throw flights.
+   */
+  let unarmedOrigin: Vec3 | null = null;
 
   /** A fielder's hands: feet position raised to ball-release height. */
   function handsOf(f: FielderState): Vec3 {
@@ -286,8 +306,23 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
 
       let event: FieldingEvent | null = null;
 
-      // --- Catch evaluation (latches freeze while the ball is dead or held) --
-      if (ballLive && holder === null) {
+      // Catch arming (2026-07-05): a hit flight is uncatchable until it has
+      // travelled CATCH_ARM_DISTANCE_M from its launch point — the backstop
+      // can no longer instant-catch the ball on the contact tick (the ball
+      // used to START inside her radius, so the entry roll fired before the
+      // ball visibly left the bat). One-way: arming never re-suppresses.
+      if (unarmedOrigin !== null) {
+        const travelled = Math.hypot(
+          ball.position.x - unarmedOrigin.x,
+          ball.position.y - unarmedOrigin.y,
+          ball.position.z - unarmedOrigin.z,
+        );
+        if (travelled >= GAME.CATCH_ARM_DISTANCE_M) unarmedOrigin = null;
+      }
+
+      // --- Catch evaluation (latches freeze while the ball is dead or held,
+      // --- and the whole pass is suppressed while the flight is unarmed) ----
+      if (ballLive && holder === null && unarmedOrigin === null) {
         const penalty = approachPenalty(
           Math.hypot(ball.velocity.x, ball.velocity.y, ball.velocity.z),
         );
@@ -398,11 +433,32 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
         const releaseAfter = GAME.THROW_RELEASE_DELAY_S * f.params.releaseDelayMult;
         if (runnerTargetPost !== null && holdTime >= releaseAfter - EPSILON) {
           const p = post(runnerTargetPost);
-          const velocity = throwVelocity(
-            hands,
-            { x: p.x, y: FIELD.POST_HEIGHT, z: p.z }, // aim at the top of the post
-            pitchSpeed(f.character.stats.pitch),
-          );
+          // Relay throws (2026-07-05): a teammate F (never the holder — the
+          // qualifying inequality is unsatisfiable for him anyway) qualifies
+          // when dist(F, P) + RELAY_ADVANTAGE_M < dist(holder, P) AND
+          // dist(F, P) < the holder's direct throw distance to P (the second
+          // condition is implied by the first while the advantage is positive;
+          // kept as coded spec fidelity). The nearest-to-post qualifier wins,
+          // and the throw targets that fielder's CURRENT position at hands
+          // height — they gather on arrival via normal radius entry and
+          // re-throw next hold cycle. One-hop logic only (no planning). The
+          // emitted event still names the threatened post.
+          const holderDist = Math.hypot(f.x - p.x, f.z - p.z);
+          let relay: FielderState | null = null;
+          let relayDist = Infinity;
+          for (const other of fielders) {
+            if (other === f) continue;
+            const d = Math.hypot(other.x - p.x, other.z - p.z);
+            if (d + GAME.RELAY_ADVANTAGE_M < holderDist && d < holderDist && d < relayDist) {
+              relay = other;
+              relayDist = d;
+            }
+          }
+          const target =
+            relay !== null
+              ? { x: relay.x, y: PHYSICS.BALL_RELEASE_HEIGHT, z: relay.z } // at the relay fielder's hands
+              : { x: p.x, y: FIELD.POST_HEIGHT, z: p.z }; // aim at the top of the post
+          const velocity = throwVelocity(hands, target, pitchSpeed(f.character.stats.pitch));
           if (velocity !== null) {
             deps.applyThrow({ origin: hands, velocity, angularVelocity: { x: 0, y: 0, z: 0 } });
             f.hasBall = false;
@@ -435,6 +491,10 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
       return holder === null ? null : holder.character.id;
     },
 
+    armFlight(origin) {
+      unarmedOrigin = { x: origin.x, y: origin.y, z: origin.z }; // defensive copy
+    },
+
     reset() {
       for (const f of fielders) {
         f.x = f.home.x;
@@ -447,6 +507,7 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
       holder = null;
       holdTime = 0;
       fumbledFlight = false;
+      unarmedOrigin = null;
     },
   };
 }

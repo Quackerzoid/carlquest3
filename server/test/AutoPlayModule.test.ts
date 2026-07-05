@@ -6,8 +6,10 @@
  *   - pitchDecision: 3 draws — [0] spin magnitude (stat-weighted), [1] spin sign,
  *     [2] aim scatter (shared by both horizontal axes via a single roll mapped to
  *     an angle offset).
- *   - swingDecision: 2 draws — [0] timingError (uniform in ±AUTOPLAY_TIMING_NOISE_S),
- *     [1] aim zone roll (power-weighted across the legal fan of posts).
+ *   - swingDecision: 3 draws — [0] timingError (uniform in ±AUTOPLAY_TIMING_NOISE_S),
+ *     [1] aim zone roll (power-weighted across the legal fan of posts),
+ *     [2] loft elevation (uniform in [AUTOPLAY_LOFT_MIN_DEG, AUTOPLAY_LOFT_MAX_DEG];
+ *     2026-07-05 readable-game overhaul — was 2 draws before the loft draw landed).
  *   - runDecision: 1 draw — the go/stay roll against pGo.
  */
 import { describe, expect, it } from 'vitest';
@@ -162,6 +164,29 @@ describe('AutoPlayModule', () => {
       expect(powerfulTotal / N).toBeGreaterThan(weakTotal / N);
     });
 
+    it('samples a real loft: launch elevation always within [AUTOPLAY_LOFT_MIN_DEG, AUTOPLAY_LOFT_MAX_DEG]', () => {
+      // The 0°-forever monoculture is dead: every auto hit lofts. The band is
+      // strictly inside the HitModule clamp (-10°..60°), so the elevation of
+      // the aim vector IS the launch angle after normaliseAim — normalisation
+      // preserves direction and the clamp never bites in [5°, 50°].
+      const auto = createAutoPlayModule(createRng(77));
+      for (let i = 0; i < 200; i++) {
+        const { input } = auto.swingDecision(carl, GAME.BASE_TIMING_WINDOW);
+        const deg = elevationDeg(input.aim);
+        expect(deg).toBeGreaterThanOrEqual(GAME.AUTOPLAY_LOFT_MIN_DEG - 1e-9);
+        expect(deg).toBeLessThanOrEqual(GAME.AUTOPLAY_LOFT_MAX_DEG + 1e-9);
+      }
+    });
+
+    it('loft varies across draws (not a constant elevation)', () => {
+      const auto = createAutoPlayModule(createRng(78));
+      const degs = new Set<number>();
+      for (let i = 0; i < 50; i++) {
+        degs.add(Math.round(elevationDeg(auto.swingDecision(carl, GAME.BASE_TIMING_WINDOW).input.aim)));
+      }
+      expect(degs.size).toBeGreaterThan(5);
+    });
+
     it('returns a well-formed swing roll event', () => {
       const auto = createAutoPlayModule(createRng(8));
       const { roll } = auto.swingDecision(carl, GAME.BASE_TIMING_WINDOW);
@@ -242,6 +267,41 @@ describe('AutoPlayModule', () => {
       expect(roll.roll).toBeLessThan(1);
       expect(typeof roll.detail).toBe('string');
       expect(roll.detail.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('draw-count contract (deterministic replay depends on this)', () => {
+    function countingRng(): { rng: () => number; count: () => number } {
+      const inner = createRng(1234);
+      let n = 0;
+      return {
+        rng: () => {
+          n += 1;
+          return inner();
+        },
+        count: () => n,
+      };
+    }
+
+    it('pitchDecision consumes exactly 3 draws', () => {
+      const c = countingRng();
+      const auto = createAutoPlayModule(c.rng);
+      auto.pitchDecision(kian, NEUTRAL_PITCH_MODS);
+      expect(c.count()).toBe(3);
+    });
+
+    it('swingDecision consumes exactly 3 draws (2 + the 2026-07-05 loft draw)', () => {
+      const c = countingRng();
+      const auto = createAutoPlayModule(c.rng);
+      auto.swingDecision(carl, GAME.BASE_TIMING_WINDOW);
+      expect(c.count()).toBe(3);
+    });
+
+    it('runDecision consumes exactly 1 draw', () => {
+      const c = countingRng();
+      const auto = createAutoPlayModule(c.rng);
+      auto.runDecision(carl, { ballHeld: false, ballDistToTargetPost: 10 });
+      expect(c.count()).toBe(1);
     });
   });
 

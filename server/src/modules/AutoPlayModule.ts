@@ -10,9 +10,11 @@
  * order — change this comment in lockstep with the implementation):
  *   - pitchDecision: 3 draws — [0] spin magnitude (stat-weighted), [1] spin
  *     sign, [2] aim scatter angle.
- *   - swingDecision: 2 draws — [0] timingError (uniform in
+ *   - swingDecision: 3 draws — [0] timingError (uniform in
  *     ±AUTOPLAY_TIMING_NOISE_S), [1] aim zone roll (power-weighted across the
- *     legal fan of posts).
+ *     legal fan of posts), [2] loft elevation (uniform in
+ *     [AUTOPLAY_LOFT_MIN_DEG, AUTOPLAY_LOFT_MAX_DEG]; 2026-07-05 readable-game
+ *     overhaul — the draw count changed 2 → 3 when the loft draw landed).
  *   - runDecision: 1 draw — the go/stay roll against pGo.
  */
 import {
@@ -122,6 +124,18 @@ export function createAutoPlayModule(rng: () => number): {
     const target = posts[zoneIndex] ?? posts[0];
     if (target === undefined) throw new RangeError('no posts configured for the swing aim fan');
 
+    // Draw 2: loft elevation, uniform in [LOFT_MIN, LOFT_MAX] degrees
+    // (2026-07-05 readable-game overhaul). The aim's y-component is
+    // tan(loft) × horizontal length, so the vector's elevation IS the sampled
+    // loft; the band sits strictly inside HitModule's clamp (-10°..60°), so
+    // normaliseAim preserves it and the launch angle equals the sample. This
+    // replaces the y = 0 aim whose 0°-forever line drives made every auto hit
+    // instantly catchable along its whole flight (bug investigation, Bug B).
+    const loftRoll = rng();
+    const loftDeg =
+      GAME.AUTOPLAY_LOFT_MIN_DEG + loftRoll * (GAME.AUTOPLAY_LOFT_MAX_DEG - GAME.AUTOPLAY_LOFT_MIN_DEG);
+    const aimY = Math.tan(loftDeg * (Math.PI / 180)) * Math.hypot(target.x, target.z);
+
     const spinInput = 0; // batter aim carries no sidespin intent in auto-play; kept for wire shape.
     const roll: RollEvent = {
       contest: 'swing',
@@ -131,7 +145,7 @@ export function createAutoPlayModule(rng: () => number): {
       threshold: effectiveWindowS,
       success: Math.abs(timingError) < effectiveWindowS,
     };
-    return { input: { aim: { x: target.x, y: 0, z: target.z }, spinInput }, timingError, roll };
+    return { input: { aim: { x: target.x, y: aimY, z: target.z }, spinInput }, timingError, roll };
   }
 
   function runDecision(runner: Character, situation: RunSituation): { go: boolean; roll: RollEvent } {

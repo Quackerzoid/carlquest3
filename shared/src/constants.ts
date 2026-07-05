@@ -23,7 +23,7 @@ const PHYSICS = {
 } as const;
 
 /** Bowler stands here, facing the batter; doubles as fielding slot 0 so the two cannot drift. */
-const BOWLING_SQUARE = { x: 0, z: 7.5 };
+const BOWLING_SQUARE = { x: 0, z: 15 };
 
 const FIELD = {
   /** Batter stands here; world origin. */
@@ -33,44 +33,48 @@ const FIELD = {
   /**
    * Posts 1–4, run anticlockwise — first post at NEGATIVE x so it appears to
    * the batter's right from the match camera (screen-right = −x); runners
-   * therefore visibly circle counter-clockwise. Placeholder school-rounders
-   * layout, x-mirrored per the 2026-07-05 auto-play redesign (user-directed).
+   * therefore visibly circle counter-clockwise. School-rounders layout,
+   * x-mirrored per the 2026-07-05 auto-play redesign (user-directed) and
+   * scaled ×2 per the 2026-07-05 readable-game overhaul (real speeds on a
+   * bigger field — flight/run RATIOS change deliberately; square sizes and
+   * sensor radii are semantics, not distances, and stay unscaled).
    */
   POSTS: [
-    { x: -11, z: 4 },
-    { x: -9, z: 15 },
-    { x: 3, z: 17 },
-    { x: 8.5, z: 6 },
+    { x: -22, z: 8 },
+    { x: -18, z: 30 },
+    { x: 6, z: 34 },
+    { x: 17, z: 12 },
   ],
   POST_HEIGHT: 1.2,
   POST_RADIUS: 0.04,
-  /** Half-extent of the square ground plane rendered in Milestone 1. */
-  GROUND_HALF_EXTENT: 40,
+  /** Half-extent of the square ground plane rendered in Milestone 1 (×2 with the field, 2026-07-05). */
+  GROUND_HALF_EXTENT: 80,
   BATTING_SQUARE_SIZE: 2,
   BOWLING_SQUARE_SIZE: 2.5,
-  /** Run-out sensor cylinder radius around each post (M2 design decision). */
+  /** Run-out sensor cylinder radius around each post (M2 design decision; deliberately NOT scaled ×2 — contact semantics). */
   POST_SENSOR_RADIUS: 0.5,
   /**
    * Default nine fielding slots (M4 placeholder; real positioning lands in M8).
    * Slot 0 is the bowler (must equal BOWLING_SQUARE), slot 1 the backstop,
    * slots 2–5 mind posts 1–4, and slots 6–8 patrol the deep field.
-   * x-mirrored with POSTS for the counter-clockwise orientation (2026-07-05).
+   * x-mirrored with POSTS for the counter-clockwise orientation and ×2 scaled
+   * with the field (2026-07-05).
    */
   FIELDING_POSITIONS: [
     BOWLING_SQUARE,
-    { x: 0, z: -3 },
-    { x: -12, z: 3 },
-    { x: -10, z: 16 },
-    { x: 4, z: 18 },
-    { x: 9.5, z: 5 },
-    { x: -16, z: 24 },
-    { x: -3, z: 28 },
-    { x: 12, z: 24 },
+    { x: 0, z: -6 },
+    { x: -24, z: 6 },
+    { x: -20, z: 32 },
+    { x: 8, z: 36 },
+    { x: 19, z: 10 },
+    { x: -32, z: 48 },
+    { x: -6, z: 56 },
+    { x: 24, z: 48 },
   ],
-  /** Rectangular legal fielding area (spec §4); placeholder like the rest of the field geometry. */
-  LEGAL_ZONE: { minX: -20, maxX: 20, minZ: -6, maxZ: 32 },
-  /** Fielders must stay at least this far (m) from the batting square (spec §4). */
-  BATTING_SQUARE_KEEPOUT: 3,
+  /** Rectangular legal fielding area (spec §4); ×2 with the rest of the field geometry (2026-07-05). */
+  LEGAL_ZONE: { minX: -40, maxX: 40, minZ: -12, maxZ: 64 },
+  /** Fielders must stay at least this far (m) from the batting square (spec §4; ×2 with the field, 2026-07-05). */
+  BATTING_SQUARE_KEEPOUT: 6,
   /** The designated pitcher always stands here (spec §4); alias of the bowling square. */
   PITCHING_SPOT: BOWLING_SQUARE,
 } as const;
@@ -100,8 +104,8 @@ const GAME = {
   HIT_ELEVATION_MAX_DEG: 60,
   /** Pitch aim elevation cap, degrees (M3 design decision). */
   PITCH_ELEVATION_MAX_DEG: 20,
-  /** Demo play ends after this long live, or when at rest (M3 design decisions). */
-  PLAY_TIMEOUT_S: 6,
+  /** Play ends after this long live, or when at rest (M3 design decision; ×2 with the field, 2026-07-05). */
+  PLAY_TIMEOUT_S: 12,
   BALL_REST_SPEED: 0.1,
   BALL_REST_TIME_S: 1,
   /** pCatch approach-penalty weight — fast-arriving balls are harder to catch (M4 design decision). */
@@ -118,10 +122,10 @@ const GAME = {
   CATCH_HEIGHT_MAX: 2.5,
   /** Seconds a mid-game disconnected player may reconnect before the room disposes. */
   RECONNECT_GRACE_S: 60,
-  /** Sim seconds after PLAY entry (or a no-contact respawn) before the auto pitch beat. */
-  AUTOPLAY_PITCH_DELAY_S: 1.0,
-  /** Minimum sim-second gap between consecutive roll broadcasts (run beats rate-limit). */
-  AUTOPLAY_BEAT_MIN_GAP_S: 0.6,
+  /** Sim seconds after PLAY entry (or a no-contact respawn) before the auto pitch beat (readable pacing, 2026-07-05). */
+  AUTOPLAY_PITCH_DELAY_S: 1.5,
+  /** Minimum sim-second gap between consecutive roll broadcasts (run beats rate-limit; readable pacing, 2026-07-05). */
+  AUTOPLAY_BEAT_MIN_GAP_S: 1.0,
   /** Auto-batter timing error is sampled uniform in ±this many seconds. */
   AUTOPLAY_TIMING_NOISE_S: 0.3,
   /** Runner AI base go-probability term. */
@@ -130,8 +134,36 @@ const GAME = {
   AUTOPLAY_RUN_NERVE_W: 0.3,
   /** Runner AI risk term when the ball is held by a fielder. */
   AUTOPLAY_RUN_HELD_RISK: 0.15,
-  /** Ball-to-post distance (m) at which the runner AI's distance risk saturates. */
-  AUTOPLAY_RUN_DIST_REF: 30,
+  /** Ball-to-post distance (m) at which the runner AI's distance risk saturates (×2 with the field, 2026-07-05). */
+  AUTOPLAY_RUN_DIST_REF: 60,
+  /**
+   * Auto-batter loft band, degrees (2026-07-05 readable-game overhaul): the
+   * swing decision samples a real launch elevation in this range, killing the
+   * 0°-forever line-drive monoculture. Deliberately strictly inside the
+   * HIT_ELEVATION clamp so the sampled loft survives HitModule normalisation.
+   */
+  AUTOPLAY_LOFT_MIN_DEG: 5,
+  AUTOPLAY_LOFT_MAX_DEG: 50,
+  /**
+   * A hit flight is uncatchable until it has travelled this far (m) from its
+   * launch point (2026-07-05): kills the backstop contact-tick instant catch.
+   * Throw flights are exempt (they arm immediately — relay catches stay live).
+   */
+  CATCH_ARM_DISTANCE_M: 4,
+  /**
+   * Relay throws (2026-07-05): a holder throws to a teammate instead of the
+   * threatened post when that teammate is at least this many metres closer to
+   * the post than the holder is.
+   */
+  RELAY_ADVANTAGE_M: 6,
+  /** Sim seconds after a missed swing before the ball respawns for the re-pitch (2026-07-05; rest/timeout stays as fallback). */
+  MISS_RESPAWN_S: 1.5,
+  /**
+   * Outcome hold (2026-07-05): sim seconds between the play resolution
+   * broadcast and the field being reset/rebuilt — clients get a readable
+   * tableau of how the play died instead of an instant whole-field teleport.
+   */
+  OUTCOME_HOLD_S: 1.5,
 } as const;
 
 /**
