@@ -736,9 +736,14 @@ export function createFieldersView(scene: THREE.Scene): FieldersView {
         const kit = teams.kitOf(id);
         if (kit !== e.kit) {
           const f = flags.get(id);
-          // The held icon is a child of the OLD group — drop the reference so ensureIcon
-          // rebuilds it against the new group next time the character holds the ball.
-          if (f) f.icon = null;
+          // The held icon is a child of the OLD group (which rebuildEntryKit disposes) — its
+          // SpriteMaterial was allocated HERE (ensureIcon), not inside the model, so the model's
+          // dispose() won't release it. Dispose it explicitly before dropping the reference, so
+          // ensureIcon rebuilds a fresh sprite against the new group next time the ball is held.
+          if (f?.icon) {
+            (f.icon.material as THREE.SpriteMaterial).dispose();
+            f.icon = null;
+          }
           rebuildEntryKit(scene, groupToId, id, e, kit);
         }
       }
@@ -1126,7 +1131,9 @@ export function createBenchView(scene: THREE.Scene): BenchView {
             ? input.squadBIds
             : [];
       const runnerSet = new Set(input.runnerIds);
-      // Bench = batting squad − current batter − live runners − out-this-innings.
+      // Bench = batting squad − current batter − live runners. Out-this-innings batters are NOT
+      // excluded: once the server deletes their runner entry they leave runnerIds and flow back
+      // to a seat as a fresh untinted model (see the view header), so they ARE re-seated.
       const benched = new Set<string>();
       for (const id of battingSquad) {
         if (id === input.currentBatterId) continue;

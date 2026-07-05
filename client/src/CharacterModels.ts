@@ -272,6 +272,42 @@ const VISUALS: Record<string, Visual> = {
   },
 };
 
+// ---- Blob silhouette --------------------------------------------------------------------
+// The body-head is a single lathe profile revolved about y. Its silhouette is a friendly
+// ROUNDED blob (a weeble/egg), NOT a spinning-top: a firmly-seated rounded base, a broad body
+// bulge at `bulgeAt`, and a rounded head DOME that ends in a soft crown cap (no pinched spike).
+// The old profile tapered both ends to a point (sin below the bulge, cos above) which rendered
+// as an ugly diamond/kite balancing on its tip — this is the readable-overhaul fix.
+//
+// `blobRadiusFraction(t, bulgeAt)` returns the profile radius as a fraction of `widthR` in
+// [BLOB_CROWN_FRACTION, 1] for t (0 = ground, 1 = crown). It is the SINGLE source of the
+// silhouette: the lathe profile is built from it AND hand/face placement query it, so the hands
+// can never embed and the face never floats off the body regardless of future retuning.
+const BLOB_BASE_FRACTION = 0.5; // seated base = 50% of max width — a rounded, planted bottom
+const BLOB_CROWN_FRACTION = 0.12; // crown cap = 12% of max width — a rounded top, never a point
+const BLOB_STEPS = 24; // lathe profile samples (was 16 — more samples smooth the dome)
+
+function blobRadiusFraction(t: number, bulgeAt: number): number {
+  const b = bulgeAt;
+  if (t <= b) {
+    // Base → bulge: a quarter-circle swell off a seated base floor (rounded bottom).
+    const u = b > 0 ? t / b : 1;
+    const round = Math.sqrt(Math.max(0, 1 - (1 - u) * (1 - u)));
+    return BLOB_BASE_FRACTION + (1 - BLOB_BASE_FRACTION) * round;
+  }
+  // Bulge → crown: a semicircle shoulder (rounded DOME) tapering to a small crown cap, so the
+  // very top is a gentle rounded cap rather than a pinched spike.
+  const u = (t - b) / (1 - b);
+  const dome = Math.sqrt(Math.max(0, 1 - u * u));
+  return BLOB_CROWN_FRACTION + (1 - BLOB_CROWN_FRACTION) * dome;
+}
+
+/** The blob's x-axis half-width (metres) at height fraction t. depthScale only squashes z, so
+ * x half-width is the unscaled profile radius — this is what hand placement must clear. */
+function blobRadiusAt(v: Visual, t: number): number {
+  return v.widthR * blobRadiusFraction(t, v.bulgeAt);
+}
+
 // ---- Canvas face/kit painter -----------------------------------------------------------
 // One 512×512 canvas per character, wrapped around the lathe blob (u = around, v = up).
 // Layout (deterministic, no rng): a kit-colour band with a trim collar near the top, a big
@@ -332,10 +368,34 @@ function paintCharacterTexture(v: Visual, kit: { shirt: number; trim: number }):
   }
 
   // ---- Face patch: a skin-coloured rounded panel on the front band (centred u, upper v) ----
+  // The face is painted in UV space, but the same UV rectangle covers a very different PHYSICAL
+  // area on a narrow character (kian, joe) vs a wide one (jonty, whale) — the lathe wraps the u
+  // axis around the whole circumference, so a constant faceW fraction stretches the face wide on
+  // wide bodies and tall on narrow ones (measured 0.76..2.4 aspect across the roster — visibly
+  // squashed). Fix: hold faceH constant and DERIVE faceW per character so the face renders at a
+  // consistent ~1:1 physical aspect (roughly circular eyes, undistorted mouth) on everyone.
+  //   physical aspect = (faceWfrac · circumference) / (faceHfrac · height); solve for aspect≈1.
+  // circumference is taken at the face's own height using the shared blob profile (+ depthScale
+  // for the oval cross-section), so this tracks any future silhouette retune automatically.
   const faceCx = TEX_SIZE * 0.5;
-  const faceCy = TEX_SIZE * 0.28;
-  const faceW = TEX_SIZE * 0.34;
-  const faceH = TEX_SIZE * 0.26;
+  const faceCyFrac = 0.28;
+  const faceCy = TEX_SIZE * faceCyFrac;
+  const FACE_H_BASE = 0.24;
+  // Face height as a fraction of the model height maps (flipY) to v = 1 − faceCyFrac.
+  const faceHeightT = 1 - faceCyFrac;
+  const faceRx = blobRadiusAt(v, faceHeightT);
+  const faceRAvg = (faceRx + faceRx * v.depthScale) / 2; // oval cross-section average radius
+  const faceCirc = 2 * Math.PI * Math.max(faceRAvg, 0.001);
+  // aspect 1: faceWfrac = faceHFrac · H / circ. Clamp faceW so a very wide body still gets a
+  // readable (not sliver) face and a very narrow one doesn't wrap the patch around the sides.
+  const faceWIdeal = (FACE_H_BASE * v.heightM) / faceCirc;
+  const faceWFrac = Math.min(0.5, Math.max(0.135, faceWIdeal));
+  // When faceW is FLOOR-clamped (the widest bodies: jonty, whale — their ideal width would be a
+  // sliver), grow faceH by the SAME factor faceW was inflated so the ~1:1 aspect is restored
+  // instead of leaving the face squashed-wide. Unclamped characters keep FACE_H_BASE (ratio 1).
+  const faceHFrac = FACE_H_BASE * (faceWFrac / faceWIdeal);
+  const faceW = TEX_SIZE * faceWFrac;
+  const faceH = TEX_SIZE * faceHFrac;
   ctx.fillStyle = skinCss;
   ctx.beginPath();
   ctx.ellipse(faceCx, faceCy, faceW / 2, faceH / 2, 0, 0, Math.PI * 2);
@@ -358,9 +418,11 @@ function paintCharacterTexture(v: Visual, kit: { shirt: number; trim: number }):
   }
 
   // ---- Eyes/brows/mouth painted per mood ----
+  // Eye spacing scales with faceW; eye SIZE is floored in absolute pixels so the narrowest
+  // faces (whale/jonty, faceW≈69px) keep crisp readable eyes rather than pin-pricks.
   const eyeY = faceCy - faceH * 0.03;
-  const eyeDx = faceW * 0.19;
-  const eyeR = faceW * 0.05;
+  const eyeDx = faceW * 0.2;
+  const eyeR = Math.max(faceW * 0.055, 5);
   ctx.fillStyle = '#14110d';
 
   const drawEyes = (openness: number, browAngle: number): void => {
@@ -521,28 +583,17 @@ export function buildCharacterModel(character: Character, kit: KitId): Character
 
   const group = new THREE.Group();
 
-  // ---- The blob: a single LatheGeometry profile revolved 360° — an egg/bean silhouette
-  // whose widest point sits at `bulgeAt` of the height. This is the ONE main body-head
-  // mesh (no separate head/neck/torso/pelvis) per the user's minimal-mascot requirement. ----
+  // ---- The blob: a single LatheGeometry profile revolved 360° — a friendly ROUNDED egg/
+  // weeble silhouette (seated base, body bulge at `bulgeAt`, rounded head dome). This is the
+  // ONE main body-head mesh (no separate head/neck/torso/pelvis) per the user's minimal-mascot
+  // requirement. The radius at each height comes from `blobRadiusFraction` (shared with hand/
+  // face placement) so the shape, the hand clearance and the face patch can never drift apart. ----
   const H = v.heightM;
-  const bulgeY = H * v.bulgeAt;
   const profile: THREE.Vector2[] = [];
-  const steps = 16;
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps; // 0 (ground) .. 1 (crown)
-    const y = t * H;
-    // A smooth taper both below and above the bulge point using a half-sine lobe on each
-    // side, so the silhouette reads as a rounded egg rather than a lathe-y vase.
-    let radius: number;
-    if (y <= bulgeY) {
-      const localT = bulgeY > 0 ? y / bulgeY : 0;
-      radius = v.widthR * Math.sin(localT * (Math.PI / 2));
-    } else {
-      const span = H - bulgeY;
-      const localT = span > 0 ? (y - bulgeY) / span : 0;
-      radius = v.widthR * Math.cos(localT * (Math.PI / 2));
-    }
-    profile.push(new THREE.Vector2(Math.max(radius, 0.001), y));
+  for (let i = 0; i <= BLOB_STEPS; i++) {
+    const t = i / BLOB_STEPS; // 0 (ground) .. 1 (crown)
+    const radius = v.widthR * blobRadiusFraction(t, v.bulgeAt);
+    profile.push(new THREE.Vector2(Math.max(radius, 0.001), t * H));
   }
   // phiStart = π puts the UV seam (u=0/u=1) at phi=π i.e. (x=0, z=-widthR) — the BACK of
   // the model — so u=0.5 (phi=0: x=0, z=+widthR) lands on the FRONT, exactly where the
@@ -564,48 +615,70 @@ export function buildCharacterModel(character: Character, kit: KitId): Character
   body.add(blob);
   group.add(body);
 
-  // ---- Extra tell meshes (kept to ≤2 per character; most tells are painted above) ----
+  // ---- Extra tell meshes (kept to ≤2 per character; most tells are painted above). Heights
+  // are height FRACTIONS on the new rounded dome, and radii are sized from the ACTUAL head
+  // width there (blobRadiusAt) so a cap/band hugs the dome instead of floating over a spike. ----
   if (v.extra === 'cap-brim') {
-    // Kian: a flattened tweed disc + short forward brim near the blob's crown.
+    // Kian: a flattened tweed cap capping the head dome, with a short forward brim.
     const capMat = new THREE.MeshLambertMaterial({ color: CAP_COLOUR });
     materials.push(capMat);
-    const crownY = H * 0.94;
-    const crown = part(new THREE.CylinderGeometry(v.widthR * 0.62, v.widthR * 0.62, H * 0.05, 12), capMat);
+    const capT = 0.9; // sit high on the dome
+    const headR = blobRadiusAt(v, capT);
+    const crownY = capT * H;
+    // A shallow spherical cap over the crown reads as a cloth cap far better than a flat disc.
+    const crown = part(
+      new THREE.SphereGeometry(headR * 1.08, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.5),
+      capMat,
+    );
     crown.position.y = crownY;
+    crown.scale.y = 0.55; // flatten into a cap
     body.add(crown);
-    const brim = part(new THREE.BoxGeometry(v.widthR * 0.8, H * 0.02, v.widthR * 0.5), capMat);
-    brim.position.set(0, crownY - H * 0.015, v.widthR * 0.4);
+    const brim = part(new THREE.BoxGeometry(headR * 1.7, H * 0.015, headR * 1.2), capMat);
+    brim.position.set(0, crownY, headR * 0.95);
     body.add(brim);
   }
   if (v.extra === 'headband') {
-    // Jonty: a white headband torus around the upper blob, over the painted curls.
+    // Jonty: a slim white headband torus around the forehead, above the brows. Sits high on the
+    // dome (t≈0.87) with a thin tube so it reads as a sweatband, not a bowl. The torus radius
+    // matches the head width there so it hugs rather than floats.
     const bandMat = new THREE.MeshLambertMaterial({ color: HEADBAND_COLOUR });
     materials.push(bandMat);
-    const band = part(new THREE.TorusGeometry(v.widthR * 0.78, H * 0.018, 8, 20), bandMat);
+    const bandT = 0.87;
+    const headR = blobRadiusAt(v, bandT);
+    const band = part(new THREE.TorusGeometry(headR * 1.02, headR * 0.1, 8, 28), bandMat);
     band.rotation.x = Math.PI / 2;
-    band.position.y = H * 0.78;
+    band.scale.z = v.depthScale; // match the oval cross-section so it hugs the head
+    band.position.y = bandT * H;
     body.add(band);
   }
   if (v.extra === 'quiff-tuft') {
-    // Laurie: a single small tuft mesh flicking up from the blond hairline.
+    // Laurie: a single small tuft flicking up-and-forward from the blond hairline on the dome.
     const tuftMat = new THREE.MeshLambertMaterial({ color: v.hairColour ?? HAIR_BLOND });
     materials.push(tuftMat);
-    const tuft = part(new THREE.ConeGeometry(H * 0.035, H * 0.09, 8), tuftMat);
-    tuft.position.set(0, H * 0.97, v.widthR * 0.25);
-    tuft.rotation.x = -0.5;
+    const tuftT = 0.9;
+    const tuft = part(new THREE.ConeGeometry(H * 0.045, H * 0.11, 8), tuftMat);
+    tuft.position.set(0, tuftT * H, blobRadiusAt(v, tuftT) * 0.6);
+    tuft.rotation.x = -0.6;
     body.add(tuft);
   }
 
   // ---- Floating sphere hands: two spheres beside the body, NOT connected by arms. They
   // are children of `body` (not `group`) so the body's bob/lean pivot carries them along
   // naturally — a bobbing body with hands that stay statically in world space would read
-  // as broken, not "floating". They sit roughly at the blob's widest point height, offset
-  // outward in x, slightly forward in z so they read in front of the silhouette from the
-  // +z camera. Their OWN local position/rotation is still free for Task 4 to animate an
-  // independent orbit (wind-up) or carry pose on top of the inherited body motion. ----
-  const handY = bulgeY * 0.95;
-  const handOffsetX = v.widthR * v.depthScale + v.widthR * v.handScale * 0.9;
+  // as broken, not "floating". They sit a little below the widest point, offset outward in x
+  // and slightly forward in z so they read in front of the silhouette from the +z camera.
+  // Their OWN local position/rotation is still free for animation (wind-up orbit / carry). ----
   const handR = Math.max(v.widthR * v.handScale, 0.05);
+  // Hands hover just below the bulge (looks like arms hanging by the sides), as a height
+  // FRACTION so it tracks the new profile: bulge is at v.bulgeAt, hands at 0.92× that.
+  const handT = v.bulgeAt * 0.92;
+  const handY = handT * H;
+  // Clear the body: the inner edge of the hand sphere must sit a positive DAYLIGHT gap outside
+  // the blob's actual x half-width at hand height (blobRadiusAt) — the old formula used the
+  // DEPTH half-width and subtracted nothing for the sphere radius, so every hand embedded
+  // −0.02..−0.08 m into the silhouette. Daylight scales gently with size (whale gets more).
+  const handDaylight = Math.max(0.07, v.widthR * 0.16);
+  const handOffsetX = blobRadiusAt(v, handT) + handR + handDaylight;
   const handBaseColour = v.handColour ?? v.skin;
   const handStripeColour = v.number === 6 ? kitColours.trim : null; // darcy's wristband tell
   const handTexture = paintHandTexture(handBaseColour, handStripeColour);
