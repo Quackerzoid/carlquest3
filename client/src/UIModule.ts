@@ -4,7 +4,13 @@
  * `#status` debug line retires. All wording that the acceptance asserts on
  * (describeResolution, legend text, board labels) lives HERE, not in main.ts.
  */
-import { CHARACTERS, CONST, type PlayOutcome, type PlayResolution } from '@carlquest/shared';
+import {
+  CHARACTERS,
+  CONST,
+  type PlayOutcome,
+  type PlayResolution,
+  type RollEvent,
+} from '@carlquest/shared';
 import type { MatchStateView, Net } from './NetModule';
 
 /** Tolerant roster lookup for display (unlike shared getCharacter, which throws). */
@@ -45,6 +51,12 @@ export interface UI {
   update(state: MatchStateView, net: Net): void;
   /** Push a plain-English line onto the event feed (newest first, keeps 6). */
   pushEvent(text: string): void;
+  /**
+   * Flash a dice-moment banner centre-top for ~1.4 s (max 2 stacked; oldest drops)
+   * AND echo the same line onto the event feed. The star moment of the autoplay
+   * identity — every `roll` broadcast lands here.
+   */
+  showRoll(e: RollEvent): void;
   /** Clear the feed and hide overlays (rematch and lobby-return call this). */
   reset(): void;
   /**
@@ -60,23 +72,24 @@ export interface UI {
 }
 
 const FEED_MAX = 6;
+const ROLL_BANNER_MAX = 2;
+const ROLL_BANNER_MS = 1400;
 
-/** The full key vocabulary, in scorer's-card order; the legend lights the active subset. */
+/**
+ * The key vocabulary after the autoplay redesign: plays resolve themselves, so the
+ * only keys left are the management pair. Camera and repositioning are mouse-driven
+ * (surfaced through the contextual hint, not this list).
+ */
 interface LegendItem {
   key: string;
   label: string;
 }
 const LEGEND_VOCABULARY: readonly LegendItem[] = [
-  { key: 'A/S/D', label: 'spin' },
-  { key: 'P', label: 'pitch' },
-  { key: 'Space', label: 'swing' },
-  { key: 'R', label: 'run' },
-  { key: 'T', label: 'stop' },
   { key: 'Enter', label: 'confirm/ready' },
   { key: 'N', label: 'rematch' },
 ];
 
-/** Which vocabulary keys are live for MY side in this phase (spec §1 mapping). */
+/** Which vocabulary keys are live for MY side in this phase (autoplay legend mapping). */
 function litKeys(state: MatchStateView, net: Net): ReadonlySet<string> {
   const side = net.mySide();
   if (side === null) return new Set();
@@ -84,18 +97,14 @@ function litKeys(state: MatchStateView, net: Net): ReadonlySet<string> {
     case 'INITIAL_POSITIONING':
     case 'PRE_PLAY':
       return new Set(['Enter']);
-    case 'PLAY':
-      return net.myRole() === 'batting'
-        ? new Set(['Space', 'R', 'T'])
-        : new Set(['A/S/D', 'P']);
     case 'GAME_OVER':
       return new Set(['N']);
     default:
-      return new Set(); // LOBBY, DRAFT — mouse only
+      return new Set(); // LOBBY, DRAFT, PLAY — mouse only / hands off
   }
 }
 
-/** Contextual mouse note appended after the key vocabulary (DRAFT turn, fielding hints). */
+/** Contextual mouse note appended after the key vocabulary (DRAFT turn, mouse hints). */
 function legendHint(state: MatchStateView, net: Net): string {
   const side = net.mySide();
   if (state.phase === 'DRAFT') {
@@ -103,10 +112,41 @@ function legendHint(state: MatchStateView, net: Net): string {
       ? 'your pick — click a row on the sheet'
       : 'opponent picks';
   }
+  if (state.phase === 'PLAY') return 'play in progress — the dice decide';
   const positioning = state.phase === 'INITIAL_POSITIONING' || state.phase === 'PRE_PLAY';
-  const fielding = side !== null && state.battingSide !== side;
-  if (positioning && fielding) return 'click fielder → click ground · Esc clear';
+  if (positioning) {
+    const fielding = side !== null && state.battingSide !== side;
+    const camera = 'drag to orbit · wheel to zoom · Home resets';
+    return fielding ? `click fielder → click ground · Esc clear · ${camera}` : camera;
+  }
   return '';
+}
+
+// ---- Roll-banner wording: `KIAN PITCHES — SPIN 8+ (0.62) — RIPS THE SPIN!` ----
+
+const ROLL_VERBS: Record<RollEvent['contest'], string> = {
+  pitch: 'pitches',
+  swing: 'swings',
+  run: 'on the paths',
+  catch: 'under the ball',
+};
+
+function rollVerdict(e: RollEvent): string {
+  switch (e.contest) {
+    case 'pitch':
+      return e.success ? 'rips the spin!' : 'keeps it straight';
+    case 'swing':
+      return e.success ? 'connects!' : 'beaten!';
+    case 'run':
+      return e.success ? 'goes!' : 'holds!';
+    case 'catch':
+      return e.success ? 'taken!' : 'dropped!';
+  }
+}
+
+/** One line per dice moment — the banner uppercases it via CSS; the feed shows it as-is. */
+export function describeRoll(e: RollEvent): string {
+  return `${characterName(e.actorId)} ${ROLL_VERBS[e.contest]} — ${e.detail} — ${rollVerdict(e)}`;
 }
 
 /**
@@ -152,6 +192,7 @@ export function createUI(container: HTMLElement): UI {
   const boardBadges = requireChild<HTMLDivElement>(container, '#board-badges');
   const boardRows = requireChild<HTMLDivElement>(container, '#board-rows');
   const feed = requireChild<HTMLOListElement>(container, '#hud-feed');
+  const rollBanners = requireChild<HTMLDivElement>(container, '#roll-banners');
   const legend = requireChild<HTMLDivElement>(container, '#hud-legend');
   const result = requireChild<HTMLDivElement>(container, '#hud-result');
   const resultScore = requireChild<HTMLDivElement>(container, '#result-score');
@@ -159,6 +200,14 @@ export function createUI(container: HTMLElement): UI {
   const resultLine = requireChild<HTMLDivElement>(container, '#result-line');
   const rematchButton = requireChild<HTMLButtonElement>(container, '#result-rematch');
   const leaveButton = requireChild<HTMLButtonElement>(container, '#result-leave');
+
+  function pushEvent(text: string): void {
+    const entry = document.createElement('li');
+    entry.className = 'feed-entry';
+    entry.textContent = text;
+    feed.prepend(entry);
+    while (feed.children.length > FEED_MAX) feed.lastElementChild?.remove();
+  }
 
   let notice: string | null = null;
   let rematchCallback: (() => void) | null = null;
@@ -253,16 +302,31 @@ export function createUI(container: HTMLElement): UI {
       renderLegend(state, net);
       renderResult(state);
     },
-    pushEvent(text) {
-      const entry = document.createElement('li');
-      entry.className = 'feed-entry';
-      entry.textContent = text;
-      feed.prepend(entry);
-      while (feed.children.length > FEED_MAX) feed.lastElementChild?.remove();
+    pushEvent,
+    showRoll(e) {
+      const line = describeRoll(e);
+      const banner = document.createElement('div');
+      banner.className = `roll-banner ${e.success ? 'is-success' : 'is-fail'}`;
+      banner.dataset['contest'] = e.contest;
+      const contest = document.createElement('span');
+      contest.className = 'roll-contest';
+      contest.textContent = e.contest;
+      const text = document.createElement('span');
+      text.className = 'roll-text';
+      text.textContent = line;
+      banner.append(contest, text);
+      rollBanners.appendChild(banner);
+      // Max 2 stacked: drop the oldest immediately when a third arrives.
+      while (rollBanners.children.length > ROLL_BANNER_MAX) rollBanners.firstElementChild?.remove();
+      window.setTimeout(() => {
+        banner.remove();
+      }, ROLL_BANNER_MS);
+      pushEvent(line);
     },
     reset() {
       notice = null;
       feed.innerHTML = '';
+      rollBanners.innerHTML = '';
       result.hidden = true;
       container.hidden = true;
       renderLegend(null, null);

@@ -3,14 +3,12 @@ import { Client, type Room } from 'colyseus.js';
 import type {
   DraftPickInput,
   MatchPhase,
-  PitchInput,
   PlayResolution,
   RepositionInput,
-  RunDecisionInput,
+  RollEvent,
   SetBatterInput,
   SetPitcherInput,
   SubstituteInput,
-  SwingInput,
 } from '@carlquest/shared';
 
 const SERVER_URL = `ws://${location.hostname}:2567`;
@@ -103,9 +101,6 @@ export interface Net {
   mySide(): 'A' | 'B' | null;
   /** This client's role in the current play, or null outside PLAY / before a side is assigned. */
   myRole(): 'batting' | 'fielding' | null;
-  sendPitch(input: PitchInput): void;
-  sendSwing(input: SwingInput & { timing: number }): void;
-  sendRunDecision(input: RunDecisionInput): void;
   sendDraftPick(input: DraftPickInput): void;
   sendSetPitcher(input: SetPitcherInput): void;
   sendReposition(input: RepositionInput): void;
@@ -115,6 +110,8 @@ export interface Net {
   sendReadyForPlay(): void;
   sendRematch(): void;
   onPlayOutcome(callback: (resolution: PlayResolution) => void): void;
+  /** Fires on every automated dice-moment broadcast (pitch/swing/run/catch contests). */
+  onRoll(callback: (e: RollEvent) => void): void;
   onRejected(callback: (rejection: RejectionEvent) => void): void;
   onOpponentLeft(callback: (side: string) => void): void;
   /**
@@ -172,15 +169,6 @@ function wrapRoom(room: Room<MatchStateView>): Net {
       if (side === null || room.state.phase !== 'PLAY') return null;
       return room.state.battingSide === side ? 'batting' : 'fielding';
     },
-    sendPitch(input) {
-      room.send('pitch', input);
-    },
-    sendSwing(input) {
-      room.send('swing', input);
-    },
-    sendRunDecision(input) {
-      room.send('runDecision', input);
-    },
     sendDraftPick(input) {
       room.send('draftPick', input);
     },
@@ -207,6 +195,9 @@ function wrapRoom(room: Room<MatchStateView>): Net {
     },
     onPlayOutcome(callback) {
       room.onMessage('playOutcome', (resolution: PlayResolution) => callback(resolution));
+    },
+    onRoll(callback) {
+      room.onMessage('roll', (e: RollEvent) => callback(e));
     },
     onRejected(callback) {
       room.onMessage('rejected', (rejection: RejectionEvent) => callback(rejection));

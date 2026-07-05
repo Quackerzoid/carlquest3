@@ -32,6 +32,12 @@ export function createPositioningControls(
   net: Net,
   selection: SelectionStore,
   onLocalAction: (text: string) => void,
+  /**
+   * Optional drag suppressor (autoplay redesign §4): when the orbit camera reports a
+   * drag in progress (or just ended), the click that concludes it must NOT select or
+   * reposition a fielder — orbiting and click-to-reposition share the same canvas.
+   */
+  isDragging?: () => boolean,
 ): PositioningControls {
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
@@ -53,6 +59,7 @@ export function createPositioningControls(
   }
 
   const handleClick = (event: MouseEvent): void => {
+    if (isDragging?.() === true) return; // camera-orbit drag release, not a reposition click
     if (!isActive()) return;
     pointerToRaycaster(event);
 

@@ -1,7 +1,14 @@
 import { createScene } from './SceneModule';
-import { connect, type Net } from './NetModule';
-import { createBallView, createFieldersView, createRunnersView } from './RenderModule';
+import { connect, type MatchStateView, type Net } from './NetModule';
+import {
+  createBallView,
+  createBatterView,
+  createFieldersView,
+  createRunnersView,
+} from './RenderModule';
+import type { KitId } from './CharacterModels';
 import { attachInput } from './InputModule';
+import { createCameraControls } from './CameraControls';
 import { createDraftScreen } from './DraftScreen';
 import { createPositioningControls, type SelectionStore } from './PositioningControls';
 import { createUI, describeResolution } from './UIModule';
@@ -48,7 +55,19 @@ const { scene, camera, start } = createScene(canvas);
 const ball = createBallView(scene);
 const fielders = createFieldersView(scene);
 const runners = createRunnersView(scene);
+const batterView = createBatterView(scene);
 start();
+
+// Camera controls live for the PAGE lifetime, like the views: orbiting is a spectator
+// affordance, not per-match state, so it is created once and never detached per match.
+const cameraControls = createCameraControls(canvas, camera);
+
+/** Kit for the current batter, derived from drafted-squad membership. */
+function kitOf(id: string, state: MatchStateView): KitId {
+  if ((state.squadAIds ?? []).includes(id)) return 'A';
+  if ((state.squadBIds ?? []).includes(id)) return 'B';
+  return 'neutral';
+}
 
 const ui = createUI(hudEl);
 
@@ -136,6 +155,8 @@ function runMatch(net: Net): void {
     () => {
       // As above: selection feedback lives in the 3D highlight + panel badge now.
     },
+    // A click that concludes (or closely follows) an orbit drag must not reposition.
+    cameraControls.dragging,
   );
 
   // Single teardown for EVERY way a match ends (opponent left, leave button,
@@ -147,6 +168,7 @@ function runMatch(net: Net): void {
     detach();
     positioningControls.detach();
     selection.set(null);
+    batterView.update(null, 'neutral', false); // hide the batter; dispose stays page-lifetime
     ui.reset();
     if (active?.net === net) active = null;
   };
@@ -160,6 +182,15 @@ function runMatch(net: Net): void {
   net.onRejected((rejection) => {
     if (torn) return;
     ui.pushEvent(describeRejection(rejection.reason));
+  });
+  net.onRoll((e) => {
+    if (torn) return;
+    // Banner + feed line (showRoll echoes to the feed itself), plus the matching
+    // 3D beat: the bowler's wind-up on the pitch roll, the bat swing on the swing
+    // roll (connect and miss both swing — a miss just follows through).
+    ui.showRoll(e);
+    if (e.contest === 'pitch') fielders.windUp(e.actorId);
+    else if (e.contest === 'swing') batterView.swing();
   });
   net.onOpponentLeft((side) => {
     net.markLeaving();
@@ -220,6 +251,14 @@ function runMatch(net: Net): void {
     runners.setTeams([...state.squadAIds], [...state.squadBIds]);
     fielders.update(state.fielders.values());
     runners.update(state.runners.values());
+    // Current batter at the batting square; suppressed (hidden, not disposed) while a
+    // runner with the same id is on-field so there is never a double render.
+    const batterId = state.currentBatterId || null;
+    batterView.update(
+      batterId,
+      batterId === null ? 'neutral' : kitOf(batterId, state),
+      batterId !== null && state.runners.has(batterId),
+    );
     if (state.phase === 'LOBBY') {
       // Idempotent refresh: the first patch may arrive after showLobbyWaiting's
       // synchronous read, and later patches are harmless no-op re-assignments.
