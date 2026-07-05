@@ -61,20 +61,96 @@ export function createScene(canvas: HTMLCanvasElement) {
   scene.fog = new THREE.Fog(0xe9cba4, 50, 150);
 
   // ---------------------------------------------------------------- sky dome
+  // Procedural equirectangular sky (one canvas, mapped onto a large inverted
+  // sphere) so it reads correctly from every orbit angle within the camera's
+  // polar clamp (10°-80° elevation): graded horizon, a sun disc + glow low
+  // in the +z direction (matching the DirectionalLight below), and a field
+  // of soft scattered clouds banding the upper sky. u wraps azimuth (0..2π),
+  // v runs zenith(0)->horizon(~0.72)->nadir(1), so there is no seam at the
+  // vertical poles (top/bottom are flat colour fills, never visited within
+  // the polar clamp) and the horizontal wrap tiles seamlessly (drawn with
+  // wrapped x sampling, see the cloud loop below).
   {
-    const ctx = make2dContext(64, 512);
-    const grad = ctx.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0.0, '#7fa3c9'); // zenith — fading blue
-    grad.addColorStop(0.45, '#c9b18f');
-    grad.addColorStop(0.62, '#f0c98c'); // warm band above the stands
-    grad.addColorStop(0.72, '#f6dcae'); // horizon gold
-    grad.addColorStop(1.0, '#e9cba4');
+    const W = 1024;
+    const H = 512;
+    const ctx = make2dContext(W, H);
+    const skyRand = createLcg(0x50cb);
+
+    // Vertical gradient: zenith blue -> warm band -> horizon gold -> ground haze.
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0.0, '#5f86b8'); // zenith — fading blue
+    grad.addColorStop(0.42, '#9db2c4');
+    grad.addColorStop(0.58, '#c9b18f');
+    grad.addColorStop(0.68, '#f0c98c'); // warm band above the horizon
+    grad.addColorStop(0.74, '#f6dcae'); // horizon gold
+    grad.addColorStop(0.82, '#e9cba4'); // below-horizon haze (matches fog colour)
+    grad.addColorStop(1.0, '#dcb98f');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 64, 512);
+    ctx.fillRect(0, 0, W, H);
+
+    // Sun disc + glow. The DirectionalLight below sits at (25,30,-18), i.e.
+    // towards +x/-z; the sphere's default UV mapping puts +x at u≈0 (and
+    // u≈1, the seam), -z at u≈0.75, so u≈0.85 (between them, biased towards
+    // -z) places the painted sun roughly under the actual light direction
+    // without needing to rotate the mesh afterwards.
+    const sunU = 0.85;
+    const sunV = 0.66;
+    const sunX = sunU * W;
+    const sunY = sunV * H;
+    {
+      const glow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 170);
+      glow.addColorStop(0.0, 'rgba(255,244,214,0.95)');
+      glow.addColorStop(0.15, 'rgba(255,230,180,0.55)');
+      glow.addColorStop(0.5, 'rgba(255,214,150,0.18)');
+      glow.addColorStop(1.0, 'rgba(255,214,150,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(sunX - 170, sunY - 170, 340, 340);
+      ctx.beginPath();
+      ctx.fillStyle = '#fff8e6';
+      ctx.arc(sunX, sunY, 34, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Scattered soft clouds: elongated radial-gradient blobs, wrapped across
+    // the u seam (drawn up to three times, offset by ±W) so panning all the
+    // way round shows no discontinuity.
+    const cloudBands = [
+      { vMin: 0.08, vMax: 0.22, n: 10, r: 70 },
+      { vMin: 0.24, vMax: 0.4, n: 14, r: 55 },
+      { vMin: 0.42, vMax: 0.56, n: 10, r: 40 },
+    ];
+    for (const band of cloudBands) {
+      for (let i = 0; i < band.n; i++) {
+        const u = skyRand();
+        const v = band.vMin + skyRand() * (band.vMax - band.vMin);
+        const cx = u * W;
+        const cy = v * H;
+        const rx = band.r * (0.6 + skyRand() * 0.8);
+        const ry = rx * (0.32 + skyRand() * 0.18);
+        const alpha = 0.16 + skyRand() * 0.22;
+        for (const dx of [-W, 0, W]) {
+          const g = ctx.createRadialGradient(cx + dx, cy, 0, cx + dx, cy, rx);
+          g.addColorStop(0.0, `rgba(255,250,240,${alpha})`);
+          g.addColorStop(0.7, `rgba(255,250,240,${alpha * 0.4})`);
+          g.addColorStop(1.0, 'rgba(255,250,240,0)');
+          ctx.save();
+          ctx.translate(cx + dx, cy);
+          ctx.scale(1, ry / rx);
+          ctx.translate(-(cx + dx), -cy);
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(cx + dx, cy, rx, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    }
+
     const skyTex = new THREE.CanvasTexture(ctx.canvas);
     skyTex.colorSpace = THREE.SRGBColorSpace;
+    skyTex.wrapS = THREE.RepeatWrapping;
     const sky = new THREE.Mesh(
-      new THREE.SphereGeometry(300, 16, 12),
+      new THREE.SphereGeometry(300, 48, 32),
       new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false }),
     );
     sky.position.set(CX, 0, CZ);
