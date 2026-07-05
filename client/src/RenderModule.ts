@@ -347,14 +347,15 @@ interface FielderTarget {
 }
 
 // ---- Wind-up timing (spec §3: "release coincides with ballLive") ----
-// GAME.AUTOPLAY_PITCH_DELAY_S is 1.0 s: the room broadcasts the pitch `roll` event
-// (which triggers this animation) at PLAY entry, then resolves the actual pitch — and
-// ballLive — 1.0 s later. WIND_UP_DURATION_S is deliberately SHORTER than that gap and
-// ends with a short settle back onto the idle/holder pose: starting the wind-up
-// immediately on the roll broadcast means the release-frame peak (RELEASE_FRACTION
-// through the animation) lands well inside the 1.0 s window, so the arm visibly whips
-// forward and is back at rest by the time the ball is actually live — matching the
-// player's read of "the pitcher just threw it" rather than looking early or late.
+// The room broadcasts the pitch `roll` event in the SAME tick it resolves the pitch
+// and sets ballLive (MatchRoom.autoPitch) — NOT at PLAY entry; the 1.0 s
+// AUTOPLAY_PITCH_DELAY_S elapses server-side BEFORE anything reaches this client.
+// So the wind-up starts at actual release: the arm whips forward while the ball is
+// already in its early flight, and the release-frame peak (RELEASE_FRACTION through
+// the ~0.6 s animation, ≈0.36 s in) lands around the time the ball nears the batting
+// plane. Live acceptance confirmed this reads correctly ("the pitcher just threw it").
+// If the timing is ever reworked, broadcast the pitch roll at beat SCHEDULING rather
+// than at release to run the wind-up genuinely ahead of the ball (final-review note).
 const WIND_UP_DURATION_S = 0.6;
 // Fraction of the animation at which the arm reaches full forward release extension —
 // the back three-fifths is the cocking backswing, the last two-fifths the release snap.
