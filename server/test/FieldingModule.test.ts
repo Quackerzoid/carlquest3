@@ -19,6 +19,7 @@ import {
   type BallState,
   type FielderSetup,
   type PitchParams,
+  type RollEvent,
   type Vec3,
 } from '@carlquest/shared';
 import {
@@ -580,6 +581,82 @@ describe('abilities (M9)', () => {
         atPost: 2,
       });
       expect(h.throws).toHaveLength(1);
+    });
+  });
+
+  describe('onRoll (auto-play redesign — dice-roll broadcasts)', () => {
+    const HANDS = vec(5, PHYSICS.BALL_RELEASE_HEIGHT, 5);
+
+    /** makeDeps plus an onRoll collector. */
+    function makeRollDeps(queue: number[] = []) {
+      const h = makeDeps(queue);
+      const rolls: RollEvent[] = [];
+      h.deps.onRoll = (e) => rolls.push(e);
+      return { ...h, rolls };
+    }
+
+    it('a normal pCatch attempt emits ONE catch RollEvent carrying the actual draw and threshold (won roll)', () => {
+      const p = pCatch(carl.stats.instinct, carl.stats.reflex, 0); // stationary ball → no approach penalty
+      const draw = p / 2; // strictly below the threshold — a win
+      const h = makeRollDeps([draw]);
+      const m = createFieldingModule([at(carl, 5, 5)], h.deps);
+      const event = m.tick(DT, ball(HANDS), true, null);
+      expect(event).toEqual({ kind: 'caught', by: 'carl' });
+      expect(h.rolls).toHaveLength(1);
+      expect(h.rolls[0]).toMatchObject({
+        contest: 'catch',
+        actorId: 'carl',
+        roll: draw,
+        threshold: p,
+        success: true,
+      });
+      expect(typeof h.rolls[0]?.detail).toBe('string');
+    });
+
+    it('a failed pCatch attempt still emits its RollEvent (success false), one per radius entry', () => {
+      const p = pCatch(carl.stats.instinct, carl.stats.reflex, 0);
+      const h = makeRollDeps([0.999]);
+      const m = createFieldingModule([at(carl, 5, 5)], h.deps);
+      expect(m.tick(DT, ball(HANDS), true, null)).toBeNull();
+      m.tick(DT, ball(HANDS), true, null); // still latched: no re-roll, no second event
+      expect(h.rolls).toHaveLength(1);
+      expect(h.rolls[0]).toMatchObject({ contest: 'catch', actorId: 'carl', roll: 0.999, threshold: p, success: false });
+    });
+
+    it('IMMOVABLE guaranteed catch emits success true, threshold 1, roll 0 — and NO rng draw', () => {
+      const h = makeRollDeps(); // default rng 0.999 would miss; it must never be consulted
+      const m = createFieldingModule([at(jonty, 5, 5)], h.deps);
+      const event = m.tick(DT, ball(HANDS), true, null);
+      expect(event).toEqual({ kind: 'caught', by: 'jonty' });
+      expect(h.rngCallCount()).toBe(0);
+      expect(h.rolls).toHaveLength(1);
+      expect(h.rolls[0]).toMatchObject({ contest: 'catch', actorId: 'jonty', roll: 0, threshold: 1, success: true });
+    });
+
+    it('a fumble emits TWO events: the won pCatch roll, then a fumble roll (detail mentions fumble, success false)', () => {
+      const h = makeRollDeps([0, 0]); // win pCatch, then 0 < 0.35 → fumble
+      const m = createFieldingModule([at(joe, 5, 5)], h.deps);
+      expect(m.tick(DT, ball(HANDS), true, null)).toBeNull();
+      expect(h.rolls).toHaveLength(2);
+      expect(h.rolls[0]).toMatchObject({ contest: 'catch', actorId: 'joe', success: true });
+      expect(h.rolls[1]).toMatchObject({ contest: 'catch', actorId: 'joe', roll: 0, threshold: CONST.ABILITY.BUTTERFINGERS_FUMBLE_P, success: false });
+      expect(h.rolls[1]?.detail).toMatch(/fumble/i);
+    });
+
+    it('a survived fumble roll reports success true (the fielder held on)', () => {
+      const h = makeRollDeps([0, 0.999]); // win pCatch, survive the fumble roll
+      const m = createFieldingModule([at(joe, 5, 5)], h.deps);
+      expect(m.tick(DT, ball(HANDS), true, null)).toEqual({ kind: 'caught', by: 'joe' });
+      expect(h.rolls).toHaveLength(2);
+      expect(h.rolls[1]).toMatchObject({ contest: 'catch', actorId: 'joe', roll: 0.999, success: true });
+      expect(h.rolls[1]?.detail).toMatch(/fumble/i);
+    });
+
+    it('omitting onRoll entirely changes nothing (optional dep)', () => {
+      const h = makeDeps([0]);
+      expect(h.deps.onRoll).toBeUndefined();
+      const m = createFieldingModule([at(carl, 5, 5)], h.deps);
+      expect(m.tick(DT, ball(HANDS), true, null)).toEqual({ kind: 'caught', by: 'carl' });
     });
   });
 

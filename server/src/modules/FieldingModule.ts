@@ -20,6 +20,7 @@ import {
   type FielderSetup,
   type FieldingAbilityParams,
   type PitchParams,
+  type RollEvent,
   type Vec3,
 } from '@carlquest/shared';
 
@@ -57,6 +58,16 @@ export interface FieldingDeps {
    * roll — same seam as the rng call it scales.
    */
   pressure?: () => boolean;
+  /**
+   * Dice-moment observer (2026-07-05 auto-play redesign): invoked with a
+   * `catch`-contest RollEvent for EVERY catch attempt — the pCatch roll (the
+   * actual draw v the effective probability), a guaranteed IMMOVABLE attempt
+   * (success true, threshold 1, roll 0 — no rng draw), and the BUTTERFINGERS
+   * fumble roll (success = held on; detail mentions the fumble). Purely
+   * observational: presence or absence changes no behaviour and no rng draw
+   * counts. The room binds a `roll` broadcast here.
+   */
+  onRoll?: (e: RollEvent) => void;
 }
 
 export type FieldingEvent =
@@ -310,19 +321,56 @@ export function createFieldingModule(setup: FielderSetup[], deps: FieldingDeps):
           if (deps.pressure?.()) p *= pressureMult(f.character.stats.nerve);
           // IMMOVABLE (M9): a guaranteed attempt short-circuits the roll — NO
           // rng draw; otherwise exactly one draw per radius entry (contract).
-          const success = a.guaranteed || deps.rng() < p;
+          // Each attempt reports its dice moment through the optional onRoll
+          // dep (auto-play redesign): the guaranteed case as a threshold-1
+          // roll-0 certainty, the normal case with the real draw v pCatch.
+          let success: boolean;
+          if (a.guaranteed) {
+            success = true;
+            deps.onRoll?.({
+              contest: 'catch',
+              actorId: f.character.id,
+              detail: 'guaranteed (IMMOVABLE)',
+              roll: 0,
+              threshold: 1,
+              success: true,
+            });
+          } else {
+            const draw = deps.rng();
+            success = draw < p;
+            deps.onRoll?.({
+              contest: 'catch',
+              actorId: f.character.id,
+              detail: `pCatch ${p.toFixed(2)}`,
+              roll: draw,
+              threshold: p,
+              success,
+            });
+          }
           if (!success) continue;
           // BUTTERFINGERS (M9): one EXTRA rng draw after a won (or guaranteed)
           // attempt, only when fumbleChance > 0 — neutral counts unchanged.
-          if (a.fumbleChance > 0 && deps.rng() < a.fumbleChance) {
-            // Fumble: the ball drops dead at the fielder's FEET on the ground —
-            // parked but NOT held (no holder), so play simply continues. The
-            // entry latch stays set (no instant re-roll on the parked ball),
-            // and fumbledFlight forces every later catch this flight to
-            // classify gathered (see the flag's declaration).
-            fumbledFlight = true;
-            deps.holdBallAt({ x: f.x, y: PHYSICS.BALL_RADIUS, z: f.z });
-            break; // the ball snapshot is stale for everyone else this tick
+          if (a.fumbleChance > 0) {
+            const fumbleDraw = deps.rng();
+            const fumbled = fumbleDraw < a.fumbleChance;
+            deps.onRoll?.({
+              contest: 'catch',
+              actorId: f.character.id,
+              detail: fumbled ? 'fumbled the take' : 'held on through the fumble check',
+              roll: fumbleDraw,
+              threshold: a.fumbleChance,
+              success: !fumbled, // success = the fielder kept hold
+            });
+            if (fumbled) {
+              // Fumble: the ball drops dead at the fielder's FEET on the ground —
+              // parked but NOT held (no holder), so play simply continues. The
+              // entry latch stays set (no instant re-roll on the parked ball),
+              // and fumbledFlight forces every later catch this flight to
+              // classify gathered (see the flag's declaration).
+              fumbledFlight = true;
+              deps.holdBallAt({ x: f.x, y: PHYSICS.BALL_RADIUS, z: f.z });
+              break; // the ball snapshot is stale for everyone else this tick
+            }
           }
           f.hasBall = true;
           holder = f;

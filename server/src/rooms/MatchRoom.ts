@@ -7,21 +7,23 @@ import {
   hitAbilityMods,
   NEUTRAL_PITCH_MODS,
   pitchAbilityMods,
+  spinReadPenalty,
+  timingWindow,
   type Character,
   type DraftPickInput,
   type FielderSetup,
   type MatchPhase,
   type PitchAbilityMods,
-  type PitchInput,
   type PlayOutcome,
   type RepositionInput,
-  type RunDecisionInput,
+  type RollEvent,
   type SetBatterInput,
   type SetPitcherInput,
   type SubstituteInput,
   type SwingInput,
   type TeamSide,
 } from '@carlquest/shared';
+import { createAutoPlayModule } from '../modules/AutoPlayModule';
 import { createPositioningModule } from '../modules/PositioningModule';
 import { createPhysicsModule, type PhysicsModule } from '../modules/PhysicsModule';
 import { resolvePitch } from '../modules/PitchModule';
@@ -41,7 +43,12 @@ const { PHYSICS, GAME, FIELD, ABILITY } = CONST;
  */
 const WALL_FIELDER_ID = CHARACTERS.find((c) => c.ability === 'WALL')?.id ?? '';
 
-type SwingMessage = SwingInput & { timing: number };
+/** The pre-sampled auto-swing awaiting the ball's batting-plane crossing. */
+interface PendingSwing {
+  input: SwingInput;
+  timingError: number;
+  roll: RollEvent;
+}
 
 /** Terminating cause of a play plus the runner (if any) it puts out. */
 interface Resolved {
@@ -89,12 +96,6 @@ function isFiniteNumber(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n);
 }
 
-function isVec3(v: unknown): v is { x: number; y: number; z: number } {
-  if (typeof v !== 'object' || v === null) return false;
-  const c = v as Record<string, unknown>;
-  return isFiniteNumber(c.x) && isFiniteNumber(c.y) && isFiniteNumber(c.z);
-}
-
 /**
  * Coerce an arbitrary message payload to a safe object before property access.
  * A client can send a message with no payload (`room.send('pitch')`, payload
@@ -140,10 +141,24 @@ export class MatchRoom extends Room<MatchState> {
   private staminaById = new Map<string, number>();
   private fieldSlots: number = FIELD.FIELDING_POSITIONS.length;
   private simTime = 0;
-  /** Sim-time when the live ball crossed the batting-square plane; null until it does. */
-  private contactTime: number | null = null;
+  /** Latched when the live pitch first crosses the batting-square plane (the auto-swing moment). */
   private crossed = false;
-  private swung = false;
+  /**
+   * Auto-play decision maker (2026-07-05 redesign). DELIBERATELY shares the
+   * validated fielding rng stream — one seed drives the whole match's dice, and
+   * the draw order is code order (pitch 3 draws + swing 2 at the pitch beat,
+   * then catch/fumble and run draws as they arise in tick order), so a seeded
+   * room replays deterministically.
+   */
+  private autoPlay!: ReturnType<typeof createAutoPlayModule>;
+  /** Sim-time at which the next auto pitch beat fires; null = none scheduled. */
+  private pitchBeatAt: number | null = null;
+  /** Swing decision pre-sampled at the pitch beat, applied at the plane crossing. */
+  private pendingSwing: PendingSwing | null = null;
+  /** Sim-time of the last broadcast run RollEvent (AUTOPLAY_BEAT_MIN_GAP_S rate limit). */
+  private lastRunRollAt = -Infinity;
+  /** Last observed atPost per live runner — post-ARRIVAL transitions trigger run beats. */
+  private lastAtPost = new Map<string, number | null>();
   /** True from bat contact until the play ends — gates fielding/running/outcome resolution. */
   private contactMade = false;
   /**
@@ -223,6 +238,8 @@ export class MatchRoom extends Room<MatchState> {
       applyThrow: (params) => this.physics.applyPitch(params),
       holdBallAt: (pos) => this.physics.spawnBall(pos),
       pressure: () => this.rules.pressure(this.runnersOnPosts()),
+      // Every catch/fumble dice moment goes straight out as a roll broadcast.
+      onRoll: (e) => this.broadcast('roll', e),
     };
   }
 
@@ -306,6 +323,10 @@ export class MatchRoom extends Room<MatchState> {
     // throw in the sim interval; a non-finite seed would poison createRng).
     const seed = isFiniteNumber(options.seed) ? options.seed : Date.now();
     this.fieldingRng = typeof options.rng === 'function' ? options.rng : createRng(seed);
+    // ONE auto-play module on the SAME validated rng stream as fielding (see
+    // the field comment: shared stream, draw order = code order, deterministic
+    // replays from a single seed).
+    this.autoPlay = createAutoPlayModule(this.fieldingRng);
     this.fielding = createFieldingModule([], this.fieldingDeps()); // placeholder until the draft completes
     this.draft = createDraftModule([...CHARACTERS], picksEach(CHARACTERS.length));
     this.running = createRunningModule();
@@ -315,11 +336,11 @@ export class MatchRoom extends Room<MatchState> {
     this.syncFielders();
     this.syncRunners();
 
-    this.onMessage('pitch', (client, message) => this.handlePitch(client, message));
+    this.onMessage('pitch', (client) => this.handlePitch(client));
     this.onMessage('draftPick', (client, message) => this.handleDraftPick(client, message));
     this.onMessage('setPitcher', (client, message) => this.handleSetPitcher(client, message));
-    this.onMessage('swing', (client, message) => this.handleSwing(client, message));
-    this.onMessage('runDecision', (client, message) => this.handleRunDecision(client, message));
+    this.onMessage('swing', (client) => this.handleSwing(client));
+    this.onMessage('runDecision', (client) => this.handleRunDecision(client));
     this.onMessage('reposition', (client, message) => this.handleReposition(client, message));
     this.onMessage('substitute', (client, message) => this.handleSubstitute(client, message));
     this.onMessage('setBatter', (client, message) => this.handleSetBatter(client, message));
@@ -617,81 +638,99 @@ export class MatchRoom extends Room<MatchState> {
     this.syncRulesView();
   }
 
-  private handlePitch(client: Client, message: unknown): void {
+  // ---- Tombstoned player play-messages (2026-07-05 auto-play redesign) --------
+  // Plays resolve automatically as dice-roll beats; the handlers stay registered
+  // so a stale client gets a structured rejection instead of a silent drop.
+  // Paused-first ordering is kept; every other check is subsumed by the
+  // unconditional prose reason.
+
+  private handlePitch(client: Client): void {
     if (this.state.paused) {
       this.reject(client, 'pitch', 'paused');
       return;
     }
-    if (this.phase() !== 'PLAY') {
-      this.reject(client, 'pitch', `pitch only allowed in PLAY (phase ${this.phase()})`);
-      return;
-    }
-    if (this.sideOf(client) !== this.fieldingSide()) {
-      this.reject(client, 'pitch', 'wrongRole');
-      return;
-    }
-    const m = asRecord(message) as Partial<PitchInput>;
-    if (this.state.ballLive || !isVec3(m.aim) || !isFiniteNumber(m.spinInput)) {
-      this.reject(client, 'pitch', 'ball already live or malformed input');
-      return;
-    }
-    const pitcher = getCharacter(this.state.currentPitcherId);
-    // M9: the pitcher's ability mods shape the pitch (CANNON_ARM speed,
-    // CURVEBALL_MASTER spin/onset) and are held for the coming swing's context
-    // (CANNON_ARM window shrink, spin-read facts). Spin input is clamped to the
-    // same [-1, 1] the pitch actually flies with (resolvePitch clamps internally).
-    const mods = pitchAbilityMods(pitcher);
-    const params = resolvePitch(pitcher.stats, { aim: m.aim, spinInput: m.spinInput }, mods);
-    this.currentPitcherMods = mods;
-    this.lastPitchSpinInput = Math.max(-1, Math.min(1, m.spinInput));
-    this.pitcherSpinStat = pitcher.stats.spin;
-    this.physics.applyPitch(params);
-    this.state.ballLive = true;
-    this.contactMade = false;
-    this.contactTime = null;
-    this.crossed = false;
-    this.swung = false;
-    this.liveSince = this.simTime;
-    this.restSince = null;
+    this.reject(client, 'pitch', 'plays resolve automatically');
   }
 
-  private handleSwing(client: Client, message: unknown): void {
+  private handleSwing(client: Client): void {
     if (this.state.paused) {
       this.reject(client, 'swing', 'paused');
       return;
     }
-    if (this.phase() !== 'PLAY') {
-      this.reject(client, 'swing', `swing only allowed in PLAY (phase ${this.phase()})`);
+    this.reject(client, 'swing', 'plays resolve automatically');
+  }
+
+  private handleRunDecision(client: Client): void {
+    if (this.state.paused) {
+      this.reject(client, 'runDecision', 'paused');
       return;
     }
-    if (this.sideOf(client) !== this.rules.view().battingSide) {
-      this.reject(client, 'swing', 'wrongRole');
-      return;
-    }
-    const m = asRecord(message) as Partial<SwingMessage>;
-    // The client 'timing' field is accepted but ignored; the server's own
-    // sim-time is authoritative (M3 decision, latency comp revisited in M6).
-    if (!this.state.ballLive || this.swung || !isVec3(m.aim) || !isFiniteNumber(m.spinInput)) {
-      this.reject(client, 'swing', 'no live pitch, already swung, or malformed input');
-      return;
-    }
-    const error = this.timingErrorNow();
-    if (error === null) {
-      this.reject(client, 'swing', 'ball never reaches the batter');
-      return;
-    }
-    this.swung = true;
+    this.reject(client, 'runDecision', 'plays resolve automatically');
+  }
+
+  // ---- Auto-play beats (2026-07-05 redesign) -----------------------------------
+
+  /**
+   * The pitch beat: the AutoPlayModule picks the delivery, the EXISTING
+   * resolvePitch path applies it (mods, spin-fact capture — byte-for-byte the
+   * old handlePitch flow), the pitch RollEvent goes out, and the batter's swing
+   * decision is sampled IMMEDIATELY (fixed draw order on the shared rng stream)
+   * to be applied when the ball crosses the batting plane.
+   */
+  private autoPitch(): void {
+    this.pitchBeatAt = null;
+    const pitcher = getCharacter(this.state.currentPitcherId);
+    // M9: the pitcher's ability mods shape the pitch (CANNON_ARM speed,
+    // CURVEBALL_MASTER spin/onset) and are held for the coming swing's context
+    // (CANNON_ARM window shrink, spin-read facts). The auto decision's spin
+    // input is already clamped to the [-1, 1] the pitch flies with.
+    const mods = pitchAbilityMods(pitcher);
+    const decision = this.autoPlay.pitchDecision(pitcher, mods);
+    const params = resolvePitch(pitcher.stats, decision.input, mods);
+    this.currentPitcherMods = mods;
+    this.lastPitchSpinInput = Math.max(-1, Math.min(1, decision.input.spinInput));
+    this.pitcherSpinStat = pitcher.stats.spin;
+    this.physics.applyPitch(params);
+    this.state.ballLive = true;
+    this.contactMade = false;
+    this.crossed = false;
+    this.liveSince = this.simTime;
+    this.restSince = null;
+    this.broadcast('roll', decision.roll);
+
+    // Pre-sample the swing NOW. The effective window is EXACTLY resolveSwing's
+    // chain (shared formulas): timingWindow(reflex) × the pitcher's CANNON_ARM
+    // window mult × the spin-read penalty (skipped for a SWITCH-immune batter).
     const batterId = this.rules.view().currentBatterId;
     if (batterId === null) {
-      this.reject(client, 'swing', 'no batter up');
+      this.pendingSwing = null; // defensive: no batter up (unreachable in PLAY)
       return;
     }
     const batter = getCharacter(batterId);
+    const spinFactor = hitAbilityMods(batter).spinReadImmune
+      ? 1
+      : spinReadPenalty(this.pitcherSpinStat, this.lastPitchSpinInput);
+    const effectiveWindow = timingWindow(batter.stats.reflex, mods.batterTimingWindowMult * spinFactor);
+    this.pendingSwing = this.autoPlay.swingDecision(batter, effectiveWindow);
+  }
+
+  /**
+   * Apply the pre-sampled swing at the batting-plane crossing through the
+   * EXISTING resolveSwing path (full SwingContext, exactly as the old
+   * handleSwing built it). The broadcast swing RollEvent's success is
+   * RECOMPUTED from resolveSwing's actual contact result so the presentation
+   * can never contradict reality. A miss falls into the existing no-contact
+   * flow (ball flies on; the rest/timeout respawn re-schedules the pitch beat).
+   */
+  private applyAutoSwing(): void {
+    const pending = this.pendingSwing;
+    this.pendingSwing = null;
+    if (pending === null) return;
+    const batterId = this.rules.view().currentBatterId;
+    if (batterId === null) return;
+    const batter = getCharacter(batterId);
     const pressure = this.rules.pressure(this.runnersOnPosts());
-    // M9: the full ability context replaces the Task-3 neutral stopgap — the
-    // batter's own mods, the rules' final-innings gate (CLUTCH_SWING), and the
-    // delivering pitcher's window/spin facts captured at handlePitch.
-    const result = resolveSwing(batter.stats, { aim: m.aim, spinInput: m.spinInput }, error, {
+    const result = resolveSwing(batter.stats, pending.input, pending.timingError, {
       mods: hitAbilityMods(batter),
       isFinalInnings: this.rules.isFinalInnings(),
       timingWindowMult: this.currentPitcherMods.batterTimingWindowMult,
@@ -699,11 +738,8 @@ export class MatchRoom extends Room<MatchState> {
       pitchSpinInput: this.lastPitchSpinInput,
       pressure,
     });
-    if (!result.contact) {
-      // A legal swing that missed: not a rejection. The ball flies on and the
-      // play ends at rest/timeout with no contact (respawn, same batter re-pitches).
-      return;
-    }
+    this.broadcast('roll', { ...pending.roll, success: result.contact });
+    if (!result.contact) return;
     this.physics.applyHit(result.params);
     this.running.startRun(batter);
     this.contactMade = true;
@@ -711,29 +747,73 @@ export class MatchRoom extends Room<MatchState> {
     // runner's opening exposure (post 1) so the first checkRunOut does not treat
     // it as an exposure CHANGE and discard a legitimate first-tick crossing.
     this.lastExposedPosts = new Set(this.running.exposures().map((e) => e.post));
+    // Seed the arrival tracker (parked survivors must not read as fresh
+    // arrivals) and take the initial run decision at contact.
+    this.lastAtPost.clear();
+    for (const r of this.running.runners()) this.lastAtPost.set(r.id, r.atPost);
+    this.autoRunBeat();
   }
 
-  private handleRunDecision(client: Client, message: unknown): void {
-    if (this.state.paused) {
-      this.reject(client, 'runDecision', 'paused');
-      return;
+  /**
+   * One auto run beat: read the live situation (ball held? how far is the ball
+   * from the threatened post?), roll the go/stay decision for the lead runner,
+   * apply it via the EXISTING shared stop/go, and broadcast the run RollEvent —
+   * rate-limited to one broadcast per AUTOPLAY_BEAT_MIN_GAP_S sim seconds (the
+   * decision is still applied when the broadcast is suppressed). Fired at
+   * contact and at every runner post arrival.
+   */
+  private autoRunBeat(): void {
+    const decisionRunner = this.leadRunner();
+    if (decisionRunner === null) return;
+    const targetPost = decisionRunner.targetPost ?? (decisionRunner.atPost !== null ? decisionRunner.atPost + 1 : 1);
+    const post = FIELD.POSTS[targetPost - 1];
+    if (post === undefined) return; // lead runner already home — nothing to decide
+    const ball = this.physics.getBallState();
+    const situation = {
+      ballHeld: this.fielding.holderId() !== null,
+      ballDistToTargetPost: Math.hypot(ball.position.x - post.x, ball.position.z - post.z),
+    };
+    const decision = this.autoPlay.runDecision(getCharacter(decisionRunner.id), situation);
+    this.running.setDecision(decision.go);
+    if (this.simTime - this.lastRunRollAt >= GAME.AUTOPLAY_BEAT_MIN_GAP_S) {
+      this.broadcast('roll', decision.roll);
+      this.lastRunRollAt = this.simTime;
     }
-    if (this.phase() !== 'PLAY') {
-      this.reject(client, 'runDecision', `runDecision only allowed in PLAY (phase ${this.phase()})`);
-      return;
+  }
+
+  /** The most advanced live runner (exposed target beats a parked post; ties to the further post). */
+  private leadRunner(): RunnerView | null {
+    let best: RunnerView | null = null;
+    let bestProgress = -1;
+    for (const r of this.running.runners()) {
+      if (r.out || r.home) continue;
+      const progress = r.targetPost ?? r.atPost ?? 0;
+      if (progress > bestProgress) {
+        best = r;
+        bestProgress = progress;
+      }
     }
-    if (this.sideOf(client) !== this.rules.view().battingSide) {
-      this.reject(client, 'runDecision', 'wrongRole');
-      return;
+    return best;
+  }
+
+  /**
+   * Post-ARRIVAL detection for run beats: true when any live runner's atPost
+   * gained a value it did not have last tick (halt or park at a post). The
+   * tracker is seeded at contact so parked survivors never read as arrivals.
+   */
+  private detectArrivals(): boolean {
+    let arrived = false;
+    const seen = new Set<string>();
+    for (const r of this.running.runners()) {
+      seen.add(r.id);
+      const prev = this.lastAtPost.get(r.id) ?? null;
+      if (!r.out && !r.home && r.atPost !== null && r.atPost !== prev) arrived = true;
+      this.lastAtPost.set(r.id, r.atPost);
     }
-    const m = asRecord(message) as Partial<RunDecisionInput>;
-    const hasLiveRunner = this.contactMade && this.running.runners().some((r) => !r.out && !r.home);
-    if (!this.state.ballLive || !hasLiveRunner || typeof m.go !== 'boolean') {
-      this.reject(client, 'runDecision', 'no live runner or malformed input');
-      return;
+    for (const key of [...this.lastAtPost.keys()]) {
+      if (!seen.has(key)) this.lastAtPost.delete(key);
     }
-    // Shared stop/go applies to every live runner (RunningModule; user decision 2).
-    this.running.setDecision(m.go);
+    return arrived;
   }
 
   private handleConfirmPositioning(client: Client): void {
@@ -777,6 +857,11 @@ export class MatchRoom extends Room<MatchState> {
       this.rules.readyForPlay();
       this.ready = { A: false, B: false };
       this.syncRulesView();
+      // PLAY entered: schedule the auto pitch beat on SIM time (pause-safe —
+      // simTime freezes while paused, so the beat freezes with it).
+      if (this.phase() === 'PLAY') {
+        this.pitchBeatAt = this.simTime + GAME.AUTOPLAY_PITCH_DELAY_S;
+      }
     }
   }
 
@@ -812,26 +897,21 @@ export class MatchRoom extends Room<MatchState> {
     this.syncPositioning();
     this.physics.clearBlocker(WALL_FIELDER_ID); // WALL is per live post-contact ball (M9)
     this.physics.spawnBall();
+    this.syncBall(); // fresh match: schema ball parked, not the old flight's last state
     this.state.ballLive = false;
     this.contactMade = false;
     this.restSince = null;
     this.lastExposedPosts = new Set();
+    this.pitchBeatAt = null;
+    this.pendingSwing = null;
+    this.lastAtPost.clear();
+    this.lastRunRollAt = -Infinity;
     this.state.lastOutcome = '';
     this.confirmed = { A: false, B: false };
     this.ready = { A: false, B: false };
     this.syncRulesView();
     this.syncRunners();
     this.syncFielders();
-  }
-
-  /** Signed swing-timing error: positive = late, negative = early; null if no contact possible. */
-  private timingErrorNow(): number | null {
-    if (this.contactTime !== null) return this.simTime - this.contactTime;
-    const ball = this.physics.getBallState();
-    const dz = ball.position.z - FIELD.BATTING_SQUARE.z;
-    if (ball.velocity.z >= 0) return null; // moving away — will never cross
-    const timeToPlane = dz / -ball.velocity.z;
-    return -timeToPlane; // early by the projected time remaining
   }
 
   // ---- Simulation tick -------------------------------------------------------
@@ -841,6 +921,16 @@ export class MatchRoom extends Room<MatchState> {
     // Clamp to avoid a spiral-of-death catch-up burst after an event-loop stall.
     const dt = Math.min(deltaMs / 1000, PHYSICS.SIM_MAX_CATCHUP);
     this.simTime += dt;
+    // Auto pitch beat: fires only in PLAY with no live ball, when its sim-time
+    // is due (pause freezes simTime, so beats freeze automatically).
+    if (
+      this.pitchBeatAt !== null &&
+      this.simTime >= this.pitchBeatAt &&
+      this.phase() === 'PLAY' &&
+      !this.state.ballLive
+    ) {
+      this.autoPitch();
+    }
     if (!this.state.ballLive) return;
 
     // WALL (M9): while the ball is live post-contact — the same window the
@@ -851,12 +941,16 @@ export class MatchRoom extends Room<MatchState> {
 
     const beforePos = this.physics.getBallState().position;
     this.physics.step(dt);
-    const state = this.physics.getBallState();
+    let state = this.physics.getBallState();
 
-    // Record the moment the ball first crosses the batting-square plane (ideal contact).
+    // The ball's first batting-square plane crossing is the auto-swing moment:
+    // the pre-sampled swing decision is applied here through resolveSwing.
     if (!this.crossed && beforePos.z > FIELD.BATTING_SQUARE.z && state.position.z <= FIELD.BATTING_SQUARE.z) {
       this.crossed = true;
-      this.contactTime = this.simTime;
+      this.applyAutoSwing();
+      // A connected hit replaced the flight mid-tick: refresh the snapshot so
+      // fielding/rest tracking below see the hit ball, not the stale pitch.
+      state = this.physics.getBallState();
     }
 
     this.syncBall();
@@ -884,15 +978,21 @@ export class MatchRoom extends Room<MatchState> {
       if (resolved !== null) {
         this.endPlay(resolved);
       } else {
+        // Run beats: every post arrival re-rolls the shared go/stay decision.
+        if (this.detectArrivals()) this.autoRunBeat();
         this.syncRunners();
         this.syncFielders();
       }
     } else if (this.updateRestTracking(state)) {
       // No contact this play (un-hit pitch or a missed swing): quietly respawn
-      // and stay in PLAY so the batter can re-pitch — no play resolution.
+      // and stay in PLAY — no play resolution — and RE-SCHEDULE the pitch beat
+      // so the auto re-pitch loop never stalls.
       this.state.ballLive = false;
       this.physics.spawnBall();
+      this.syncBall(); // the schema must show the parked ball, not the dead flight's last state
       this.restSince = null;
+      this.pendingSwing = null;
+      this.pitchBeatAt = this.simTime + GAME.AUTOPLAY_PITCH_DELAY_S;
     }
   }
 
@@ -1037,11 +1137,21 @@ export class MatchRoom extends Room<MatchState> {
     this.contactMade = false;
     this.physics.clearBlocker(WALL_FIELDER_ID); // WALL is per live post-contact ball (M9)
     this.physics.spawnBall();
+    // Re-sync the parked ball: syncBall only runs while the ball is live, so
+    // without this the schema advertises the DEAD flight's final state all the
+    // way through PRE_PLAY — stale for clients, and a trap for tests sampling
+    // ball velocity at a play boundary (found by the Task-3 CLUTCH probe).
+    this.syncBall();
     this.fielding.reset();
     this.restSince = null;
     this.lastExposedPosts = new Set();
     this.confirmed = { A: false, B: false };
     this.ready = { A: false, B: false };
+    // Auto-play beat state is per play; the next handleReadyForPlay re-arms it.
+    this.pitchBeatAt = null;
+    this.pendingSwing = null;
+    this.lastAtPost.clear();
+    this.lastRunRollAt = -Infinity;
 
     if (resolution === null) {
       // Defensive: resolvePlay only returns null out of PLAY / with no batter,

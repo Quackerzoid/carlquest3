@@ -2,7 +2,18 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { boot, ColyseusTestServer } from '@colyseus/testing';
 import type { Room } from '@colyseus/core';
 import type { Room as ClientRoom } from 'colyseus.js';
-import { CHARACTERS, CONST, type MatchPhase, type PlayOutcome, type PlayResolution } from '@carlquest/shared';
+import {
+  CHARACTERS,
+  CONST,
+  exitVelocity,
+  getCharacter,
+  pressureMult,
+  timingFactor,
+  type MatchPhase,
+  type PlayOutcome,
+  type PlayResolution,
+  type RollEvent,
+} from '@carlquest/shared';
 import appConfig from '../src/app.config';
 import { MatchState } from '../src/rooms/MatchState';
 
@@ -26,10 +37,69 @@ const DRAFTED_B = TABLE_IDS.filter((_, i) => i % 2 === 1).slice(0, 5);
 /** A's first pick opens the batting (batting order = pick order). */
 const OPENER_ID = DRAFTED_A[0] ?? 'carl';
 
-/** rng() that always misses every real roster's pCatch (mirrors FieldingModule.test.ts convention). */
+/**
+ * rng() that always misses every real roster's pCatch. Under the auto-play
+ * redesign this rng ALSO drives the AutoPlayModule, where 0.999 samples a
+ * swing timing error of (0.999·2−1)·0.3 ≈ +0.2994 s — outside every batter's
+ * window (max timingWindow = 0.25 s) — so an ALWAYS_MISS room NEVER makes bat
+ * contact: each play sits in the deterministic no-contact re-pitch loop and
+ * the room stays in PLAY indefinitely. Tests use it exactly for that: a
+ * stable, side-effect-free PLAY state (positioning locks, pause/disconnect,
+ * rejection matrices). ALWAYS_CATCH (0) is GONE: rng 0 samples timing error
+ * −0.3 s, also a guaranteed miss, so it can no longer produce catches —
+ * outcome-specific tests pin seeds instead (see the SEED_* constants).
+ */
 const ALWAYS_MISS = (): number => 0.999;
-/** rng() that always wins the catch roll on the first radius entry. */
-const ALWAYS_CATCH = (): number => 0;
+
+/**
+ * Pinned seeds for outcome-specific auto-play tests (M4/M5 precedent for
+ * legitimate seed selection): found by a bounded sweep of seeds 1–30 with the
+ * Task-3 scratch harness (two test clients, deterministic table-order draft,
+ * plays driven purely by the room's own beats), then pinned. Each constant
+ * names the behaviour its seed exhibits ON ITS FIRST PLAY(S) so a formula or
+ * roster change that invalidates one fails loudly here, not flakily elsewhere.
+ */
+/** Seed 2, play 1: carl connects on the first pitch and parks safe at post 3 (+1 half). */
+const SEED_FIRST_PLAY_CONTACT = 2;
+const SEED_FIRST_PLAY_SAFE = 2;
+const SEED_HALF_ROUNDER = 2;
+/** Seed 2 again: play 1 parks carl safe; play 2 (laurie) connects → two runners coexist. */
+const SEED_TWO_RUNNERS = 2;
+/** Seed 7, play 1: carl's drive is caught pre-bounce (first pitch, no re-pitch loops). */
+const SEED_FIRST_PLAY_CAUGHT = 7;
+/**
+ * Seed 16: run-out DENSE — the sweep observed all three of its opening plays
+ * resolving runOut with a fielder holding the ball first (gather → throw →
+ * run-out), so the bounded outcome loops match almost immediately.
+ */
+const SEED_FIRST_PLAY_RUNOUT = 16;
+const SEED_THROW_RUNOUT = 16;
+/**
+ * Full-game seed: verified to run to GAME_OVER with a definite winner. The
+ * exact winner is NOT pinned: deep plays are not exactly reproducible under
+ * real-time tick jitter (draw-order divergence observed from play ~3 onwards
+ * in the Task-3 sweeps), so only structural full-game invariants are asserted.
+ */
+const SEED_FULL_GAME = 1;
+/**
+ * WALL seeds: the whale is parked 12 m along the pinned seed's OWN play-1 hit
+ * corridor (the auto swing aims at a post, so the corridor is the batting
+ * square → that post's direction; the spots were derived by the Task-3 search
+ * harness from the observed deterministic play-1 hit and then pinned).
+ * Seed 2: the drive dies on the whale's blocker WITHOUT him ever holding it
+ * (pure stop; his pCatch roll fails; play resolves safe). Seed 6: the stopped
+ * ball is then GATHERED by the whale, held, thrown and escapes (runOut).
+ */
+const SEED_WALL = 2;
+const SEED_WALL_SPOT = { x: 9.8, z: 6.9 };
+const SEED_WALL_THROW = 6;
+const SEED_WALL_THROW_SPOT = { x: 3.6, z: 11.4 };
+/**
+ * CLUTCH seed: only carl's CONTACT matters (the gate derives both power
+ * hypotheses from the broadcast swing roll itself), retried across up to
+ * three rematches; seed pinned for a fast, contact-rich first game.
+ */
+const SEED_CLUTCH = 2;
 
 // ---- Shared helpers --------------------------------------------------------
 
@@ -109,81 +179,73 @@ async function startPlay(room: TestRoom, clientA: TestClient, clientB: TestClien
 }
 
 /**
- * Poll until the pitched ball is genuinely near the batting-square plane.
- * `waitForNextSimulationTick` is a fixed setTimeout, not a real tick barrier, and
- * `ball.z` defaults to 0 (a false "near the plane" reading) between the tick that
- * sets ballLive and the tick that first writes the ball's real position. Latch on
- * having first seen the ball in flight (z well past the plane) before accepting a
- * near-plane reading, which eliminates that early-swing false positive.
+ * Poll until the current play resolves (phase leaves PLAY), returning the parsed
+ * resolution. Auto-play: a play may loop through several no-contact re-pitches
+ * (pitch beat +1 s → flight ~0.3 s → rest ~1 s → re-schedule) before one
+ * connects and resolves, so the tick budget is generous.
  */
-async function waitNearPlane(room: TestRoom): Promise<void> {
-  let sawInFlight = false;
-  for (let i = 0; i < 120; i += 1) {
-    await room.waitForNextSimulationTick();
-    if (!room.state.ballLive) continue;
-    if (room.state.ball.z > 1) sawInFlight = true;
-    if (sawInFlight && room.state.ball.z < 0.5) break;
-  }
-}
-
-/**
- * Pitch straight from the fielding side, poll until the ball nears the batting
- * plane, then swing with the given aim from the batting side. Both senders are
- * resolved per-call (not bound once) so this works across innings switches. Must
- * already be in PLAY.
- */
-async function pitchThenSwing(
-  room: TestRoom,
-  clientA: TestClient,
-  clientB: TestClient,
-  aim: { x: number; y: number; z: number },
-): Promise<void> {
-  fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-  await waitNearPlane(room);
-  battingClient(room, clientA, clientB).send('swing', { timing: 0, aim, spinInput: 0 });
-  await room.waitForNextSimulationTick();
-}
-
-/**
- * Pitch (fielding side), then swing (batting side) `lateTicks` after the ball
- * nears the plane, aiming from the ball's predicted one-tick-ahead contact point
- * at `target` (server-authoritative, read synchronously). `aimY` sets the
- * vertical aim (default 0 = flat drive; a large value is clamped by HitModule to
- * +60°, a large negative to −10°). Both senders are resolved per-call (not bound
- * once) so this works across innings switches. Must already be in PLAY.
- */
-async function pitchThenSwingAtTarget(
-  room: TestRoom,
-  clientA: TestClient,
-  clientB: TestClient,
-  target: { x: number; z: number },
-  lateTicks: number,
-  aimY = 0,
-): Promise<void> {
-  fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-  await waitNearPlane(room);
-  for (let i = 0; i < lateTicks; i += 1) {
-    await room.waitForNextSimulationTick();
-  }
-  const dt = CONST.PHYSICS.FIXED_TIMESTEP;
-  const cx = room.state.ball.x + room.state.ball.vx * dt;
-  const cz = room.state.ball.z + room.state.ball.vz * dt;
-  battingClient(room, clientA, clientB).send('swing', {
-    timing: 0,
-    aim: { x: target.x - cx, y: aimY, z: target.z - cz },
-    spinInput: 0,
-  });
-  await room.waitForNextSimulationTick();
-}
-
-/** Poll until the current play resolves (phase leaves PLAY), returning the parsed resolution. */
-async function waitPlayEnd(room: TestRoom, maxTicks = 800): Promise<PlayResolution> {
+async function waitPlayEnd(room: TestRoom, maxTicks = 2400): Promise<PlayResolution> {
   for (let i = 0; i < maxTicks; i += 1) {
     await room.waitForNextSimulationTick();
     if (room.state.phase !== 'PLAY') break;
   }
   if (room.state.phase === 'PLAY') throw new Error('play did not resolve in time');
   return JSON.parse(room.state.lastOutcome) as PlayResolution;
+}
+
+/** startPlay + waitPlayEnd: one whole automated play, no client play-messages. */
+async function drivePlay(room: TestRoom, clientA: TestClient, clientB: TestClient): Promise<PlayResolution> {
+  await startPlay(room, clientA, clientB);
+  return waitPlayEnd(room);
+}
+
+/** Per-play facts observed while a play runs (for outcome-class predicates). */
+interface PlayFacts {
+  /** currentBatterId read at the play's start. */
+  batter: string;
+  /** Every fielder observed holding the ball during the play. */
+  holders: Set<string>;
+  /** Peak simultaneous runner count observed during the play. */
+  maxRunners: number;
+}
+
+/**
+ * Drive automated plays until one's RESOLUTION (plus observed facts) satisfies
+ * the predicate; returns that play's resolution and facts, or throws at the
+ * bound. WHY a bounded loop instead of asserting the pinned seed's play 1
+ * directly: run 1 of this suite showed that even a play-1 outcome CLASS can
+ * flip under load (identical seed-7 rooms produced caught and safe in the same
+ * run — a marginal catch-radius entry appears/disappears with tick-boundary
+ * jitter, shifting the shared rng draw order). The pinned seeds still make the
+ * FIRST play the likely match; the loop absorbs the marginal-roll jitter
+ * without weakening any per-class gate. Callers cap maxPlays ≤ 4 when their
+ * assertions need the innings unchanged (a 5th play can drain the queue).
+ */
+async function drivePlayUntil(
+  room: TestRoom,
+  clientA: TestClient,
+  clientB: TestClient,
+  match: (res: PlayResolution, facts: PlayFacts) => boolean,
+  maxPlays = 4,
+): Promise<{ res: PlayResolution } & PlayFacts> {
+  for (let p = 0; p < maxPlays; p += 1) {
+    const batter = room.state.currentBatterId;
+    const holders = new Set<string>();
+    let maxRunners = 0;
+    await startPlay(room, clientA, clientB);
+    for (let i = 0; i < 2400 && room.state.phase === 'PLAY'; i += 1) {
+      await room.waitForNextSimulationTick();
+      for (const f of room.state.fielders.values()) {
+        if (f.hasBall) holders.add(f.id);
+      }
+      if (room.state.runners.size > maxRunners) maxRunners = room.state.runners.size;
+    }
+    if (room.state.phase === 'PLAY') throw new Error('play did not resolve in time');
+    const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
+    const facts = { batter, holders, maxRunners };
+    if (match(res, facts)) return { res, ...facts };
+  }
+  throw new Error(`no play matched the outcome predicate within ${maxPlays} plays`);
 }
 
 describe('MatchRoom', () => {
@@ -251,8 +313,13 @@ describe('MatchRoom', () => {
 
   // ---- Phase walk ----------------------------------------------------------
 
-  it('phase walk: join → INITIAL_POSITIONING → PRE_PLAY → PLAY → (caught) → PRE_PLAY with an out', async () => {
-    const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
+  it('phase walk: join → INITIAL_POSITIONING → PRE_PLAY → PLAY → (caught, auto) → PRE_PLAY with an out', async () => {
+    // Migrated (auto-play): the caught out was driven by ALWAYS_CATCH + an
+    // aimed drive at the bowler; plays now resolve themselves, so the room is
+    // seeded with SEED_FIRST_PLAY_CAUGHT (whose first play is a catch) and the
+    // walk simply waits for the automatic resolution. Gates unchanged: caught
+    // cause, outs 1, batter rotated, back to PRE_PLAY.
+    const room = await colyseus.createRoom('match', { seed: SEED_FIRST_PLAY_CAUGHT });
     const { clientA, clientB } = await connectPair(room);
 
     await waitForPhase(room, 'DRAFT');
@@ -267,336 +334,290 @@ describe('MatchRoom', () => {
     await waitForPhase(room, 'PLAY');
     expect(room.state.phase).toBe('PLAY');
 
-    // Drive a caught out → resolves back to PRE_PLAY with outs incremented.
-    await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
-    const res = await waitPlayEnd(room);
+    // No further client input: the beats deliver, swing, catch and resolve by
+    // themselves. Marginal catch rolls make the exact play that gets caught
+    // jitter-sensitive (see drivePlayUntil), so the walk closes on the first
+    // caught play within the innings-safe window. Gates unchanged: caught
+    // cause, an out on the board, the caught batter rotated off, PRE_PLAY.
+    const { res, batter } = await drivePlayUntil(room, clientA, clientB, (r) => r.cause.kind === 'caught');
     expect(room.state.phase).toBe('PRE_PLAY');
     expect(res.cause.kind).toBe('caught');
-    expect(room.state.outs).toBe(1);
-    expect(room.state.currentBatterId).not.toBe(OPENER_ID); // batter rotated on
-  });
+    expect(room.state.battingSide).toBe('A'); // still innings 1 (≤4 plays cannot drain the queue)
+    expect(room.state.outs).toBeGreaterThanOrEqual(1);
+    expect(room.state.currentBatterId).not.toBe(batter); // the caught batter rotated off
+  }, 120000);
 
-  // ---- Pitch / swing basics (migrated onto the phase machine) --------------
+  // ---- Auto pitch beat -------------------------------------------------------
 
-  it('pitch while in PLAY makes the ball live with stat-derived speed', async () => {
-    const room = await colyseus.createRoom('match', {});
+  it('the pitch beat fires itself ~1 s after PLAY entry: ball live at stat-derived speed, pitch roll broadcast', async () => {
+    // Migrated from 'pitch while in PLAY makes the ball live…': the delivery
+    // is now the room's own beat — no client message. Same speed band gate
+    // (kian pitch 8 → 26.4 m/s minus damping); additionally pins the pitch
+    // RollEvent broadcast. ALWAYS_MISS keeps the play in the deterministic
+    // no-contact loop so only the delivery is under test.
+    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
     const { clientA, clientB } = await connectPair(room);
+    const rolls: RollEvent[] = [];
+    clientA.onMessage('roll', (e: RollEvent) => rolls.push(e));
     await startPlay(room, clientA, clientB);
-    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-    for (let i = 0; i < 30; i += 1) {
-      await room.waitForNextSimulationTick();
-      if (room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0) break;
-    }
-    expect(room.state.ballLive).toBe(true);
+    expect(room.state.ballLive).toBe(false); // beat waits AUTOPLAY_PITCH_DELAY_S
+    await waitForCondition(
+      room,
+      () => room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0,
+      300,
+    );
     const speed = Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
     expect(speed).toBeGreaterThan(20); // Kian pitch 8 → 26.4 m/s minus a tick of damping
     expect(speed).toBeLessThan(27);
-  });
+    await waitForCondition(room, () => rolls.length > 0, 60);
+    expect(rolls[0]?.contest).toBe('pitch');
+    expect(rolls[0]?.actorId).toBe('kian');
+  }, 20000);
 
-  it('rejects a second pitch while the ball is live', async () => {
-    const room = await colyseus.createRoom('match', {});
+  it('resolves a whole play to a playOutcome with ZERO client play-messages', async () => {
+    // NEW (auto-play redesign §7): the core acceptance — a readied play runs
+    // pitch → swing → outcome entirely on the room's own beats. Subsumes the
+    // old 'full loop … swing connects and reverses flight' gate: the contact
+    // seed's hit is observed leaving the bat (vz flips positive) mid-play.
+    const room = await colyseus.createRoom('match', { seed: SEED_FIRST_PLAY_CONTACT });
     const { clientA, clientB } = await connectPair(room);
+    let received: PlayResolution | null = null;
+    clientA.onMessage('playOutcome', (payload: PlayResolution) => {
+      received = payload;
+    });
     await startPlay(room, clientA, clientB);
-    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-    await room.waitForNextSimulationTick();
-    const before = { vx: room.state.ball.vx, vz: room.state.ball.vz };
-    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 1, y: 0, z: 0 }, spinInput: 1 });
-    await room.waitForNextSimulationTick();
-    expect(room.state.ball.vz).toBeLessThan(0);
-    expect(Math.sign(room.state.ball.vx)).toBe(Math.sign(before.vx));
-    expect(room.state.lastRejection).toContain('pitch');
-  });
-
-  it('rejects a swing when no ball is live', async () => {
-    const room = await colyseus.createRoom('match', {});
-    const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
-    battingClient(room, clientA, clientB).send('swing', { timing: 0, aim: { x: 0.5, y: 0.3, z: 1 }, spinInput: 0 });
-    await room.waitForNextSimulationTick();
-    expect(room.state.ballLive).toBe(false);
-    expect(room.state.lastRejection).toContain('swing');
-  });
-
-  it('rejects a pitch message sent with no payload instead of crashing', async () => {
-    const room = await colyseus.createRoom('match', {});
-    const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
-    fieldingClient(room, clientA, clientB).send('pitch');
-    await room.waitForNextSimulationTick();
-    expect(room.state.ballLive).toBe(false);
-    expect(room.state.lastRejection).toContain('pitch');
-  });
-
-  it('rejects a swing message sent with a null payload instead of crashing', async () => {
-    const room = await colyseus.createRoom('match', {});
-    const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
-    battingClient(room, clientA, clientB).send('swing', null);
-    await room.waitForNextSimulationTick();
-    expect(room.state.ballLive).toBe(false);
-    expect(room.state.lastRejection).toContain('swing');
-  });
-
-  it('stays responsive to a valid pitch after payload-less pitch/swing messages', async () => {
-    const room = await colyseus.createRoom('match', {});
-    const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
-    fieldingClient(room, clientA, clientB).send('pitch');
-    await room.waitForNextSimulationTick();
-    battingClient(room, clientA, clientB).send('swing', null);
-    await room.waitForNextSimulationTick();
-    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-    for (let i = 0; i < 30; i += 1) {
+    let sawHitFlight = false;
+    for (let i = 0; i < 2400 && room.state.phase === 'PLAY'; i += 1) {
       await room.waitForNextSimulationTick();
-      if (room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0) break;
+      if (room.state.ball.vz > 1) sawHitFlight = true;
     }
-    expect(room.state.ballLive).toBe(true);
-    const speed = Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
-    expect(speed).toBeGreaterThan(20);
-    expect(speed).toBeLessThan(27);
-  });
+    expect(room.state.phase).not.toBe('PLAY');
+    expect(sawHitFlight).toBe(true); // the auto swing connected and reversed the flight
+    const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
+    expect(['caught', 'runOut', 'rounder', 'safe']).toContain(res.cause.kind);
+    await room.waitForNextSimulationTick();
+    expect(received).toEqual(res); // broadcast parity
+  }, 60000);
 
-  it('full loop: pitch, wait for plane crossing, swing connects and reverses flight', async () => {
-    const room = await colyseus.createRoom('match', {});
+  it('broadcasts rolls in beat order within a play: pitch first, then swing, then only run/catch', async () => {
+    // NEW (auto-play redesign §7): the dice moments arrive in contest order.
+    const room = await colyseus.createRoom('match', { seed: SEED_FIRST_PLAY_CONTACT });
     const { clientA, clientB } = await connectPair(room);
+    const rolls: RollEvent[] = [];
+    clientA.onMessage('roll', (e: RollEvent) => rolls.push(e));
+    await drivePlay(room, clientA, clientB);
+    // Broadcasts land asynchronously: wait until the connecting swing's roll
+    // has actually ARRIVED (under load a single tick is not enough).
+    await waitForCondition(room, () => rolls.some((r) => r.contest === 'swing' && r.success), 120);
+    // A play may loop pitch→(missed swing)→pitch…; every loop is pitch-then-
+    // swing, and run/catch rolls only ever follow a successful swing.
+    expect(rolls.length).toBeGreaterThanOrEqual(2);
+    expect(rolls[0]?.contest).toBe('pitch');
+    let lastPitchIdx = -1;
+    rolls.forEach((r, i) => {
+      if (r.contest === 'pitch') {
+        // Every re-pitch follows a FAILED swing (missed) — never a contact.
+        if (i > 0) expect(rolls[i - 1]).toMatchObject({ contest: 'swing', success: false });
+        lastPitchIdx = i;
+      }
+      if (r.contest === 'swing') expect(i).toBe(lastPitchIdx + 1); // swing immediately follows its pitch
+      if (r.contest === 'run' || r.contest === 'catch') {
+        // Run/catch rolls belong to the final (connected) swing's play phase.
+        const swingIdx = rolls.findIndex((x, j) => j < i && x.contest === 'swing' && x.success);
+        expect(swingIdx).toBeGreaterThanOrEqual(0);
+        expect(i).toBeGreaterThan(swingIdx);
+      }
+    });
+    // The connected play's swing roll reports success (presentation = reality).
+    const lastSwing = [...rolls].reverse().find((r) => r.contest === 'swing');
+    expect(lastSwing?.success).toBe(true);
+  }, 60000);
+
+  // ---- Tombstoned player play-messages ---------------------------------------
+
+  it("rejects pitch/swing/runDecision from EITHER side with exactly 'plays resolve automatically'", async () => {
+    // Migrated: replaces the whole family of per-payload pitch/swing/runDecision
+    // validation tests ('second pitch while live', 'swing with no ball',
+    // payload-less/null payload crash guards, wrong-role play messages). The
+    // handlers are tombstones — every payload, role and phase now gets the one
+    // unconditional prose reason, and junk payloads are trivially safe because
+    // the payload is never read. The 'stays responsive' gate is preserved by
+    // the beat still delivering after the junk (asserted at the end).
+    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
+    const { clientA, clientB } = await connectPair(room);
+    const rejectsA: { message: string; reason: string }[] = [];
+    const rejectsB: { message: string; reason: string }[] = [];
+    clientA.onMessage('rejected', (p: { message: string; reason: string }) => rejectsA.push(p));
+    clientB.onMessage('rejected', (p: { message: string; reason: string }) => rejectsB.push(p));
     await startPlay(room, clientA, clientB);
-    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-    await waitNearPlane(room);
-    battingClient(room, clientA, clientB).send('swing', { timing: 0, aim: { x: 0.5, y: 0.3, z: 1 }, spinInput: 0 });
-    await room.waitForNextSimulationTick();
-    await room.waitForNextSimulationTick();
-    expect(room.state.ball.vz).toBeGreaterThan(0);
-    const speed = Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
-    expect(speed).toBeGreaterThan(10);
-  }, 15000);
+
+    clientA.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 }); // batting side
+    clientB.send('pitch'); // fielding side, payload-less
+    clientA.send('swing', { timing: 0, aim: { x: 0.5, y: 0.3, z: 1 }, spinInput: 0 });
+    clientB.send('swing', null);
+    clientA.send('runDecision', { go: true });
+    clientB.send('runDecision');
+    await waitForCondition(room, () => rejectsA.length >= 3 && rejectsB.length >= 3, 120);
+
+    expect(rejectsA.map((r) => r.message)).toEqual(['pitch', 'swing', 'runDecision']);
+    expect(rejectsB.map((r) => r.message)).toEqual(['pitch', 'swing', 'runDecision']);
+    for (const r of [...rejectsA, ...rejectsB]) expect(r.reason).toBe('plays resolve automatically');
+
+    // Still alive: the pitch beat delivers regardless of the junk above.
+    await waitForCondition(room, () => room.state.ballLive, 300);
+  }, 20000);
 
   // ---- Running -------------------------------------------------------------
 
-  it('a connected hit starts a runner heading towards post 1', async () => {
-    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
+  it('a connected auto-swing starts a runner heading towards post 1', async () => {
+    // Migrated from the aimed pitchThenSwing idiom: the contact seed's first
+    // play connects by itself; the runner is observed mid-circuit. Gates
+    // unchanged: the batter-runner exists, is running, is between posts, not out.
+    const room = await colyseus.createRoom('match', { seed: SEED_FIRST_PLAY_CONTACT });
     const { clientA, clientB } = await connectPair(room);
     await startPlay(room, clientA, clientB);
-    await pitchThenSwing(room, clientA, clientB, { x: 0.5, y: 0.3, z: 1 });
-    await room.waitForNextSimulationTick();
-    const runner = room.state.runners.get('carl');
+    await waitForCondition(room, () => room.state.runners.size > 0, 600);
+    const runner = room.state.runners.get(OPENER_ID);
     expect(runner).toBeDefined();
     expect(runner?.running).toBe(true);
     expect(runner?.atPost).toBe(-1);
     expect(runner?.out).toBe(false);
-  });
+  }, 30000);
 
-  it('runDecision {go:false} halts the runner at post 1, and the play ends safe there', async () => {
-    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
+  it('an auto run decision can park the runner safe at a post, ending the play there', async () => {
+    // Migrated from 'runDecision {go:false} halts the runner at post 1…': the
+    // stop/go is now the room's own run beat (rolled at contact and at each
+    // post arrival), so the halted-safe outcome is exhibited by a pinned seed
+    // (first safe play within the innings-safe window — see drivePlayUntil).
+    // Gates preserved: cause 'safe' naming that play's own batter-runner, the
+    // schema runner PARKED (not running) at exactly the resolution's post, no
+    // outs, and score consistency with the parked post.
+    const room = await colyseus.createRoom('match', { seed: SEED_FIRST_PLAY_SAFE });
     const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
-    await pitchThenSwing(room, clientA, clientB, { x: 0.5, y: 0.3, z: 1 });
-    battingClient(room, clientA, clientB).send('runDecision', { go: false });
-
-    let haltedAtPost1 = false;
-    for (let i = 0; i < 600 && room.state.ballLive; i += 1) {
-      await room.waitForNextSimulationTick();
-      const r = room.state.runners.get('carl');
-      if (r?.atPost === 1 && !r.running) haltedAtPost1 = true;
-    }
-
-    expect(haltedAtPost1).toBe(true);
-    expect(room.state.ballLive).toBe(false);
-    const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
-    expect(res.cause).toEqual({ kind: 'safe', atPost: 1, runnerId: 'carl' });
+    const { res, batter } = await drivePlayUntil(room, clientA, clientB, (r) => r.cause.kind === 'safe');
+    const safe = res.cause as Extract<PlayOutcome, { kind: 'safe' }>;
+    expect(safe.runnerId).toBe(batter); // 'safe' always names the play's own batter-runner
+    expect(safe.atPost).toBeGreaterThanOrEqual(1);
+    const runner = room.state.runners.get(batter);
+    expect(runner?.atPost).toBe(safe.atPost);
+    expect(runner?.running).toBe(false);
+    expect(runner?.out).toBe(false);
     expect(res.outs).toEqual([]);
-    expect(res.scoreDeltaHalves).toBe(0); // post 1 < 2, banks nothing
-  }, 20000);
-
-  it('rejects runDecision when no live ball, no active runner, or a malformed payload', async () => {
-    const room = await colyseus.createRoom('match', {});
-    const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
-    const batter = battingClient(room, clientA, clientB);
-
-    batter.send('runDecision', { go: true });
-    await room.waitForNextSimulationTick();
-    expect(room.state.lastRejection).toContain('runDecision');
-
-    batter.send('runDecision', { go: 'yes' });
-    await room.waitForNextSimulationTick();
-    expect(room.state.lastRejection).toContain('runDecision');
-
-    batter.send('runDecision');
-    await room.waitForNextSimulationTick();
-    expect(room.state.lastRejection).toContain('runDecision');
-    expect(room.state.ballLive).toBe(false);
-  });
+    expect(res.scoreDeltaHalves).toBe(safe.atPost >= 2 ? 1 : 0); // half-rounder line is post 2
+  }, 120000);
 
   // ---- Run-out detection (migrated) ----------------------------------------
 
-  it('a hit flown directly at an exposed post is a run-out (event-accurate sensor)', async () => {
-    const post1 = FIELD.POSTS[0];
-    if (post1 === undefined) throw new Error('no post 1 in fixture');
-
-    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
+  it('the ball reaching an exposed post while the runner is mid-segment is a run-out', async () => {
+    // Migrated from 'a hit flown directly at an exposed post…': tests can no
+    // longer aim the hit, so a pinned seed whose first play resolves runOut
+    // exhibits the same detection path (exposure-scoped sensor crossing or
+    // holder-at-post). Gates preserved: runOut cause naming the batter-runner
+    // and the post, the runner in outs, broadcast parity, ball dead, fielders
+    // rebuilt on their slots (bowler back on the bowling square).
+    const room = await colyseus.createRoom('match', { seed: SEED_FIRST_PLAY_RUNOUT });
     const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
     let received: PlayResolution | null = null;
     clientA.onMessage('playOutcome', (payload: PlayResolution) => {
       received = payload;
     });
 
-    await pitchThenSwingAtTarget(room, clientA, clientB, post1, 0);
-
-    const res = await waitPlayEnd(room, 200);
+    // First runOut play within the innings-safe window (see drivePlayUntil).
+    // NOTE the runner is asserted via the resolution, not pinned to the play's
+    // batter: a run-out may legitimately claim a PARKED survivor forced on by
+    // the shared go decision, not only the striker.
+    const { res } = await drivePlayUntil(room, clientA, clientB, (r) => r.cause.kind === 'runOut');
     await room.waitForNextSimulationTick(); // let the broadcast land
-    expect(res.cause).toEqual({ kind: 'runOut', atPost: 1, runnerId: 'carl' });
-    expect(res.outs).toContain('carl');
+    const runOut = res.cause as Extract<PlayOutcome, { kind: 'runOut' }>;
+    expect(runOut.atPost).toBeGreaterThanOrEqual(1);
+    expect(runOut.runnerId.length).toBeGreaterThan(0);
+    expect(res.outs).toContain(runOut.runnerId);
     expect(room.state.ballLive).toBe(false);
     expect(received).toEqual(res);
-    const bowler = room.state.fielders.get('kian');
+    const bowler = room.state.fielders.get('kian'); // still innings 1: B fields, kian re-slotted
     expect(bowler?.x).toBeCloseTo(FIELD.BOWLING_SQUARE.x, 9);
     expect(bowler?.z).toBeCloseTo(FIELD.BOWLING_SQUARE.z, 9);
-  }, 20000);
+  }, 120000);
 
-  it('a stale post crossing from earlier in flight does not run the runner out on later exposure', async () => {
-    const post2 = FIELD.POSTS[1];
-    if (post2 === undefined) throw new Error('no post 2 in fixture');
-    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
-
-    await pitchThenSwingAtTarget(room, clientA, clientB, post2, 0);
-    battingClient(room, clientA, clientB).send('runDecision', { go: false }); // halt at post 1
-
-    let haltedAtPost1 = false;
-    for (let i = 0; i < 240 && room.state.ballLive && !haltedAtPost1; i += 1) {
-      await room.waitForNextSimulationTick();
-      const r = room.state.runners.get('carl');
-      if (r?.atPost === 1 && !r.running) haltedAtPost1 = true;
-    }
-    expect(haltedAtPost1).toBe(true);
-    expect(room.state.ballLive).toBe(true);
-
-    battingClient(room, clientA, clientB).send('runDecision', { go: true }); // resume towards post 2 — the stale-latch moment
-    for (let i = 0; i < 60 && room.state.ballLive; i += 1) {
-      await room.waitForNextSimulationTick();
-    }
-
-    expect(room.state.runners.get('carl')?.out).toBe(false);
-    if (!room.state.ballLive) {
-      const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
-      expect(res.cause.kind).not.toBe('runOut');
-    }
-  }, 20000);
-
-  it('a crossing while the runner is HALTED does not run them out on the later go', async () => {
-    const post2 = FIELD.POSTS[1];
-    if (post2 === undefined) throw new Error('no post 2 in fixture');
-    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
-    const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
-
-    // A near-plane (reliable, factor≈1) LOW −10° drive aimed at post 2: it blasts
-    // through post 2's run-out sensor while Carl is still heading to post 1
-    // (exposure = post 1). Carl then HALTS at post 1 — the halt changes the
-    // exposure set, clearing the post-2 crossing latch — and the ball rolls on
-    // and out. When Carl later resumes (go), exposure flips null → 2 between
-    // ticks over a now-cleared latch; the invariant under test is that this stale
-    // crossing NEVER runs him out, however the play ends. (A weak, timing-late
-    // hit that instead arrives during the halt is jitter-unreliable under the
-    // test harness's fixed-timer catch-up; this strong low drive exercises the
-    // same exposure-window latch-clear guard deterministically.)
-    await pitchThenSwingAtTarget(room, clientA, clientB, post2, 0, -1000);
-    for (let i = 0; i < 6 && room.state.runners.size === 0; i += 1) await room.waitForNextSimulationTick();
-    expect(room.state.runners.size).toBeGreaterThan(0); // the drive connected
-    battingClient(room, clientA, clientB).send('runDecision', { go: false }); // halt at post 1
-
-    let halted = false;
-    for (let i = 0; i < 300 && room.state.ballLive && !halted; i += 1) {
-      await room.waitForNextSimulationTick();
-      const r = room.state.runners.get('carl');
-      if (r?.atPost === 1 && !r.running) halted = true;
-    }
-    expect(halted).toBe(true);
-
-    let passed = false;
-    for (let i = 0; i < 600 && room.state.ballLive && !passed; i += 1) {
-      await room.waitForNextSimulationTick();
-      const dx = room.state.ball.x - post2.x;
-      const dz = room.state.ball.z - post2.z;
-      if (room.state.ball.z > post2.z && Math.hypot(dx, dz) > FIELD.POST_SENSOR_RADIUS + 0.3) passed = true;
-    }
-
-    if (passed) {
-      battingClient(room, clientA, clientB).send('runDecision', { go: true }); // exposure flips null → 2 between ticks
-      for (let i = 0; i < 240 && room.state.ballLive; i += 1) {
-        await room.waitForNextSimulationTick();
-      }
-    }
-    expect(room.state.runners.get('carl')?.out).toBe(false);
-    if (!room.state.ballLive && room.state.lastOutcome !== '') {
-      const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
-      expect(res.cause.kind).not.toBe('runOut');
-    }
-  }, 30000);
+  // RETIRED (documented in the Task-3 report): the two stale-crossing
+  // choreography tests ('a stale post crossing from earlier in flight…' and
+  // 'a crossing while the runner is HALTED…') drove the exposure-window guard
+  // via player-timed runDecision halt/go injections. runDecision is tombstoned
+  // — the between-tick decision seam those tests aimed at no longer EXISTS at
+  // the wire (auto run beats apply setDecision inside the tick, after the
+  // run-out check), so the choreography is not reconstructible from outside.
+  // The guard itself (checkRunOut's snapshot conditions + clearPostCrossings)
+  // is unchanged, runs on every play of every seeded test here, and keeps its
+  // physics-layer unit coverage (PhysicsModule crossing-latch tests).
 
   // ---- Catch / throw pipeline (migrated) -----------------------------------
 
-  it('a hit flown straight at the bowler is caught (pre-bounce) → the batter is out', async () => {
-    const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
+  it('an auto play can end caught (pre-bounce) → the batter is out', async () => {
+    // Migrated from the ALWAYS_CATCH + drive-at-the-bowler idiom (rng 0 now
+    // guarantees a swing MISS, so forced catches are impossible — see the
+    // ALWAYS_MISS comment). SEED_FIRST_PLAY_CAUGHT's first play is caught.
+    // Gates preserved: caught by a fielding-squad member, batter in outs,
+    // outs incremented (absorbs the old 'caught batter increments outs' test),
+    // ball dead, broadcast parity.
+    const room = await colyseus.createRoom('match', { seed: SEED_FIRST_PLAY_CAUGHT });
     const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
     let received: PlayResolution | null = null;
     clientA.onMessage('playOutcome', (payload: PlayResolution) => {
       received = payload;
     });
 
-    await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
-
-    const res = await waitPlayEnd(room, 120);
+    // First caught play within the innings-safe window (see drivePlayUntil).
+    const { res, batter } = await drivePlayUntil(room, clientA, clientB, (r) => r.cause.kind === 'caught');
     await room.waitForNextSimulationTick();
 
-    expect(res.cause.kind).toBe('caught');
-    expect(DRAFTED_B).toContain((res.cause as Extract<PlayOutcome, { kind: 'caught' }>).by);
-    expect(res.outs).toContain('carl'); // caught batter is out
+    expect(DRAFTED_B).toContain((res.cause as Extract<PlayOutcome, { kind: 'caught' }>).by); // innings 1: B fields
+    expect(res.outs).toContain(batter); // the caught batter is out
+    expect(res.outs.length).toBe(1);
+    expect(room.state.outs).toBeGreaterThanOrEqual(1); // still innings 1 within the window
     expect(room.state.ballLive).toBe(false);
     expect(received).toEqual(res);
-  }, 20000);
+  }, 120000);
 
-  it('a gathered ball is thrown to the exposed post for a run-out (full throw pipeline)', async () => {
-    let roomRef: TestRoom | null = null;
-    const corridorGatherRng = (): number => {
-      const b = roomRef?.state.ball;
-      return b !== undefined && Math.abs(b.x) < 1 && b.z > 2 ? 0 : 0.999;
-    };
-    const room = await colyseus.createRoom('match', { rng: corridorGatherRng });
-    roomRef = room;
+  it('a gathered ball is thrown at the exposed post for a run-out (full throw pipeline)', async () => {
+    // Migrated from the corridor-gather custom-rng choreography (a state-
+    // reading rng can no longer choreograph anything — it also drives the
+    // auto decisions, and its 0.999 arm forbids bat contact entirely).
+    // SEED_THROW_RUNOUT exhibits the pipeline naturally: a fielder HOLDS the
+    // ball (hasBall observed mid-play) and the play resolves runOut — gather →
+    // throw → ball at the exposed post. Gates preserved: holder seen, runOut
+    // cause, runner in outs, ball dead, broadcast parity. The specific
+    // holder/post are seed facts, not re-assertable aims.
+    const room = await colyseus.createRoom('match', { seed: SEED_THROW_RUNOUT });
     const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
     let received: PlayResolution | null = null;
     clientA.onMessage('playOutcome', (payload: PlayResolution) => {
       received = payload;
     });
 
-    await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0, -1000);
-
-    const holders = new Set<string>();
-    for (let i = 0; i < 180 && room.state.phase === 'PLAY'; i += 1) {
-      await room.waitForNextSimulationTick();
-      for (const f of room.state.fielders.values()) {
-        if (f.hasBall) holders.add(f.id);
-      }
-    }
-    const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
+    // First play that BOTH held the ball and resolved runOut (same play — the
+    // holders set is per play in drivePlayUntil), within a two-innings window.
+    const { res, holders } = await drivePlayUntil(
+      room,
+      clientA,
+      clientB,
+      (r, f) => r.cause.kind === 'runOut' && f.holders.size > 0,
+      12, // holder+runOut plays are common but not per-window-certain; 12 spans two innings safely
+    );
     await room.waitForNextSimulationTick();
 
-    expect([...holders]).toEqual(['kian']);
-    expect(res.cause).toEqual({ kind: 'runOut', atPost: 1, runnerId: 'carl' });
-    expect(res.outs).toContain('carl');
+    expect(holders.size).toBeGreaterThan(0); // a fielder really gathered and held the ball
+    expect(res.cause.kind).toBe('runOut');
+    expect(res.outs.length).toBe(1);
     expect(room.state.ballLive).toBe(false);
     expect(received).toEqual(res);
-  }, 20000);
+  }, 240000);
 
   // ---- Rejection matrix (structured broadcast) -----------------------------
 
   it('rejects every message out of its phase, broadcasting a structured { message, phase, reason }', async () => {
-    const room = await colyseus.createRoom('match', {});
+    // ALWAYS_MISS: no bat contact ever, so once entered PLAY holds for the
+    // whole PLAY-phase row block (an unseeded room could resolve mid-matrix).
+    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
     const { clientA, clientB } = await connectPair(room);
     // Rejections are targeted (client.send), not broadcast — each collector
     // must listen on the SAME client that sends the offending message.
@@ -655,122 +676,88 @@ describe('MatchRoom', () => {
   // ---- Scoring / outs ------------------------------------------------------
 
   it('an own-hit runner who reaches post ≥2 banks a half-rounder (scoreHalves +1)', async () => {
-    // A full rounder (home, +2 halves, batter re-queues) is unreachable in the
-    // room: the placeholder circuit is ~57.75 m and the fastest runner manages
-    // ~6.9 m/s, needing ~8.4 s versus PLAY_TIMEOUT_S = 6 s — so no runner can
-    // complete a circuit before the ball dies. The +2/re-queue path is covered
-    // by RulesModule's unit tests; here we assert the reachable scoring rung, a
-    // half-rounder (post ≥ 2 = +1 half), which exercises the same
-    // settlePlay → resolvePlay → scoreHalves wiring. See task-5 report / TUNING.
-    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
+    // A full rounder (home, +2 halves, batter re-queues) remains unreachable in
+    // the room (circuit ~57.75 m vs PLAY_TIMEOUT_S 6 s — RulesModule unit tests
+    // cover it); the reachable scoring rung is the half-rounder. Migrated from
+    // the aimed max-elevation loft: SEED_HALF_ROUNDER's designated play banks
+    // +1 half via the auto beats. Gates preserved: not an out, the scoring
+    // runner parked at post ≥ 2, scoreDeltaHalves 1, banked for side A only.
+    const room = await colyseus.createRoom('match', { seed: SEED_HALF_ROUNDER });
     const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
-
-    // A max-elevation (+60°) hard hit up the +z line: the ball hangs high, well
-    // over every post (above POST_HEIGHT), and lands far downfield — never near a
-    // post at low altitude, so no accidental run-out — while the play runs to the
-    // 6 s timeout and Carl (auto-running through the posts) reaches post 2/3.
-    await pitchThenSwingAtTarget(room, clientA, clientB, { x: 0, z: 30 }, 0, 1000);
-    const res = await waitPlayEnd(room);
-
-    expect(res.cause.kind).not.toBe('runOut');
-    expect(res.cause.kind).not.toBe('caught');
-    const carl = room.state.runners.get('carl');
-    expect(carl?.atPost).toBeGreaterThanOrEqual(2);
+    // First safe-at-≥2 play within the innings-safe window (see drivePlayUntil).
+    const { res } = await drivePlayUntil(
+      room,
+      clientA,
+      clientB,
+      (r) => r.cause.kind === 'safe' && r.cause.atPost >= 2,
+    );
+    const safe = res.cause as Extract<PlayOutcome, { kind: 'safe' }>;
+    expect(safe.atPost).toBeGreaterThanOrEqual(2);
+    expect(room.state.runners.get(safe.runnerId)?.atPost).toBe(safe.atPost);
     expect(res.scoreDeltaHalves).toBe(1);
-    expect(room.state.scoreHalvesA).toBe(1);
+    expect(room.state.scoreHalvesA).toBeGreaterThanOrEqual(1); // banked for the batting side (innings 1)
     expect(room.state.scoreHalvesB).toBe(0);
     expect(res.outs).toEqual([]);
-  }, 25000);
+  }, 120000);
 
-  it('a caught batter increments the batting side outs', async () => {
-    const room = await colyseus.createRoom('match', { rng: ALWAYS_CATCH });
-    const { clientA, clientB } = await connectPair(room);
-    await startPlay(room, clientA, clientB);
-    await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
-    const res = await waitPlayEnd(room, 120);
-    expect(res.cause.kind).toBe('caught');
-    expect(room.state.outs).toBe(1);
-    expect(res.outs.length).toBe(1);
-  }, 20000);
+  // (The old separate 'a caught batter increments the batting side outs' test
+  // is absorbed by the caught-outcome test above — same seed, same gates.)
 
   // ---- Multi-runner --------------------------------------------------------
 
   it('two runners are visible in the schema after a play where the first parked safe', async () => {
-    const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
+    // Migrated: play 1's park and play 2's contact now come from the pinned
+    // seed's own decisions instead of an injected go:false + aimed swings.
+    // Gates preserved: after a parked-safe play the NEXT batter's contact puts
+    // TWO runners in the schema — the parked survivor and the new batter-runner.
+    const room = await colyseus.createRoom('match', { seed: SEED_TWO_RUNNERS });
     const { clientA, clientB } = await connectPair(room);
 
-    // Play 1: Carl halts safe at post 1 and parks there.
-    await startPlay(room, clientA, clientB);
-    await pitchThenSwing(room, clientA, clientB, { x: 0.5, y: 0.3, z: 1 });
-    battingClient(room, clientA, clientB).send('runDecision', { go: false });
-    for (let i = 0; i < 600 && room.state.ballLive; i += 1) {
-      await room.waitForNextSimulationTick();
-    }
-    expect(room.state.phase).toBe('PRE_PLAY');
-    expect(room.state.runners.get('carl')?.atPost).toBe(1);
-    const nextBatter = room.state.currentBatterId;
-    expect(nextBatter).not.toBe('carl');
-
-    // Play 2: the next batter hits and starts running — now two runners exist.
-    await startPlay(room, clientA, clientB);
-    await pitchThenSwing(room, clientA, clientB, { x: 0.5, y: 0.3, z: 1 });
-    await room.waitForNextSimulationTick();
-    expect(room.state.runners.size).toBe(2);
-    expect(room.state.runners.get('carl')).toBeDefined();
-    expect(room.state.runners.get(nextBatter)).toBeDefined();
-    expect(room.state.runners.get(nextBatter)?.running).toBe(true);
-  }, 25000);
+    // Two simultaneous runners REQUIRE a parked survivor from an earlier play
+    // plus the current play's batter-runner, so observing maxRunners ≥ 2 IS
+    // the gate; the pinned seed exhibits it by play 2 (park, then contact).
+    const { maxRunners } = await drivePlayUntil(room, clientA, clientB, (_r, f) => f.maxRunners >= 2);
+    expect(maxRunners).toBeGreaterThanOrEqual(2); // a parked survivor + the current batter-runner coexisted
+  }, 240000);
 
   // ---- Full game / rematch -------------------------------------------------
 
   it('plays a full headless game through to GAME_OVER with a winner', async () => {
-    // Side A scores once (the opening play: a miss lets Carl bank a half-rounder);
-    // every other play is a guaranteed catch (batter out, 0 runs), so A leads 1-0
-    // and, after both innings pairs drain their batting queues, the game ends with
-    // A the winner (no tie → no tiebreak). This is the slow marquee test.
-    let scoringPlay = true;
-    const rng = (): number => (scoringPlay ? 0.999 : 0);
-    const room = await colyseus.createRoom('match', { rng });
+    // Migrated from the flip-rng choreography (score once, then force catches):
+    // a custom rng can no longer steer plays, so the marquee test simply lets a
+    // pinned seed's auto beats play the WHOLE game out. Termination is
+    // structural (each play consumes the current batter; a drained queue ends
+    // the innings). NOTE the old 'winner === A' pin is NOT carried over: it was
+    // an artefact of the rng steering, and a 20+-play game is not exactly
+    // reproducible under real-time tick jitter (deep-play draw-order divergence
+    // was observed in the Task-3 seed sweeps), so pinning the exact winner
+    // would be flake bait. The real invariants ARE kept: GAME_OVER reached, a
+    // DEFINITE winner, and the winner strictly outscoring the loser.
+    const room = await colyseus.createRoom('match', { seed: SEED_FULL_GAME });
     const { clientA, clientB } = await connectPair(room);
 
     let plays = 0;
-    while (room.state.phase !== 'GAME_OVER' && plays < 60) {
-      await startPlay(room, clientA, clientB);
-      if (scoringPlay) {
-        await pitchThenSwingAtTarget(room, clientA, clientB, { x: 0, z: 30 }, 0, 1000);
-      } else {
-        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
-      }
-      await waitPlayEnd(room);
-      // Flip to guaranteed-catch only AFTER the scoring play fully resolves — the
-      // high ball is still airborne through waitPlayEnd, and flipping early would
-      // let a fielder catch it and wipe the score.
-      scoringPlay = false;
+    while (room.state.phase !== 'GAME_OVER' && plays < 100) {
+      await drivePlay(room, clientA, clientB);
       plays += 1;
     }
 
     expect(room.state.phase).toBe('GAME_OVER');
-    expect(room.state.winner).toBe('A');
-    expect(room.state.scoreHalvesA).toBeGreaterThan(room.state.scoreHalvesB);
-  }, 120000);
+    expect(['A', 'B']).toContain(room.state.winner);
+    const winnerScore = room.state.winner === 'A' ? room.state.scoreHalvesA : room.state.scoreHalvesB;
+    const loserScore = room.state.winner === 'A' ? room.state.scoreHalvesB : room.state.scoreHalvesA;
+    expect(winnerScore).toBeGreaterThan(loserScore);
+  }, 900000);
 
   it('rematch at GAME_OVER resets to INITIAL_POSITIONING with a zeroed score', async () => {
-    let scoringPlay = true;
-    const rng = (): number => (scoringPlay ? 0.999 : 0);
-    const room = await colyseus.createRoom('match', { rng });
+    // Migrated: same seed as the marquee test drives to GAME_OVER, then the
+    // rematch gates are unchanged from M5.
+    const room = await colyseus.createRoom('match', { seed: SEED_FULL_GAME });
     const { clientA, clientB } = await connectPair(room);
 
     let plays = 0;
-    while (room.state.phase !== 'GAME_OVER' && plays < 60) {
-      await startPlay(room, clientA, clientB);
-      if (scoringPlay) {
-        await pitchThenSwingAtTarget(room, clientA, clientB, { x: 0, z: 30 }, 0, 1000);
-      } else {
-        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
-      }
-      await waitPlayEnd(room);
-      scoringPlay = false;
+    while (room.state.phase !== 'GAME_OVER' && plays < 100) {
+      await drivePlay(room, clientA, clientB);
       plays += 1;
     }
     expect(room.state.phase).toBe('GAME_OVER');
@@ -785,33 +772,33 @@ describe('MatchRoom', () => {
     expect(room.state.inningsIndex).toBe(0);
     expect(room.state.runners.size).toBe(0);
     expect(room.state.currentBatterId).toBe(OPENER_ID);
-  }, 120000);
+  }, 900000);
 
   it('garbage rng/seed join options cannot break the room (runtime-validated)', async () => {
+    // Migrated: the gate is unchanged — junk options fall back to a wall-clock
+    // seed and the room keeps functioning. What CAN'T carry over is awaiting a
+    // full resolution (the fallback seed is unknown, so contact timing is not
+    // deterministic); instead the test proves the auto pitch beat delivers at
+    // stat speed on the fallback rng and that ~4 s of live auto-play (through
+    // at least one full pitch/decision cycle) raises no uncaught exceptions.
     const errorSpy = vi.spyOn(console, 'error');
     const garbage = { rng: 1, seed: 'not-a-number' } as unknown as Record<string, unknown>;
     const room = await colyseus.createRoom('match', garbage);
     const { clientA, clientB } = await connectPair(room);
     await startPlay(room, clientA, clientB);
 
-    fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-    for (let i = 0; i < 30; i += 1) {
-      await room.waitForNextSimulationTick();
-      if (room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0) break;
-    }
-    expect(room.state.ballLive).toBe(true);
+    await waitForCondition(
+      room,
+      () => room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0,
+      300,
+    );
     const speed = Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
     expect(speed).toBeGreaterThan(20);
     expect(speed).toBeLessThan(27);
 
-    await waitNearPlane(room);
-    battingClient(room, clientA, clientB).send('swing', { timing: 0, aim: { x: 0, y: 0, z: 1 }, spinInput: 0 });
-    for (let i = 0; i < 600 && room.state.phase === 'PLAY'; i += 1) {
+    for (let i = 0; i < 240 && room.state.phase === 'PLAY'; i += 1) {
       await room.waitForNextSimulationTick();
     }
-    expect(room.state.phase).not.toBe('PLAY'); // the play resolved cleanly
-    const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
-    expect(['caught', 'runOut', 'rounder', 'safe']).toContain(res.cause.kind);
     const uncaught = errorSpy.mock.calls.filter(
       (args) => typeof args[0] === 'string' && args[0].includes('[MatchRoom] uncaught exception'),
     );
@@ -882,60 +869,41 @@ describe('MatchRoom', () => {
     }, 20000);
 
     it('after an innings switch the OTHER five field with THEIR default pitcher', async () => {
-      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_CATCH });
+      // Migrated from the ALWAYS_CATCH caught-per-play idiom. The old exact
+      // 'plays === 5' gate CANNOT survive auto-play: under auto-running a
+      // parked survivor regularly completes his circuit across LATER plays and
+      // re-queues (home re-queues, spec §8 — the Task-3 probe saw an 11-play
+      // innings), so innings length is variable-but-≥5. Gates now: the innings
+      // takes at least the queue length in plays, battingSide flips to B, and
+      // A's five field with joel (A's best arm) re-derived as default pitcher.
+      const room = await colyseus.createRoom<MatchState>('match', { seed: SEED_FULL_GAME });
       const { clientA, clientB } = await connectPair(room);
       await waitForPhase(room, 'DRAFT');
       await draftSquads(room, clientA, clientB);
-      // ALWAYS_CATCH + a flat drive straight at the bowler: caught pre-bounce
-      // every play (the same deterministic idiom as the caught-out tests — a
-      // LOFTED midfield hit would instead land in the now-unmanned deep field,
-      // be gathered post-bounce, and park batters safe indefinitely), so A's
-      // 5-batter queue drains in 5 outs and battingSide flips to 'B'.
       let plays = 0;
-      while (room.state.battingSide === 'A' && room.state.phase !== 'GAME_OVER' && plays < 8) {
-        await startPlay(room, clientA, clientB);
-        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
-        await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
+      while (room.state.battingSide === 'A' && room.state.phase !== 'GAME_OVER' && plays < 25) {
+        await drivePlay(room, clientA, clientB);
         plays += 1;
       }
-      expect(plays).toBe(5); // one caught batter per play, no re-queues
+      expect(plays).toBeGreaterThanOrEqual(5); // every original queue member must bat at least once
       expect(room.state.battingSide).toBe('B');
       expect(room.state.currentPitcherId).toBe('joel'); // A fields now; joel has A's best arm (pitch 9)
       expect(room.state.fielders.size).toBe(5);
       expect([...room.state.fielders.keys()].sort()).toEqual(['carl', 'joe', 'joel', 'jonty', 'laurie']);
-    }, 60000);
+    }, 900000);
   });
 
   // ---- M6: role gating -------------------------------------------------------
 
   describe('M6 role gating', () => {
-    it('rejects a pitch from the batting side and accepts it from the fielding side', async () => {
-      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
-      const { clientA, clientB } = await connectPair(room);
-      await startPlay(room, clientA, clientB);
-      // Side A bats first (battingSide 'A' at match start) → A may NOT pitch.
-      clientA.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-      await room.waitForNextSimulationTick();
-      expect(room.state.ballLive).toBe(false);
-      expect(JSON.parse(room.state.lastRejection).reason).toBe('wrongRole');
-      clientB.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-      await room.waitForNextSimulationTick();
-      expect(room.state.ballLive).toBe(true);
-    });
-
-    it('rejects swing and runDecision from the fielding side', async () => {
-      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
-      const { clientA, clientB } = await connectPair(room);
-      await startPlay(room, clientA, clientB);
-      clientB.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-      await waitNearPlane(room);
-      clientB.send('swing', { timing: 0, aim: { x: 0.55, y: 0.47, z: 0.65 }, spinInput: 0 });
-      await room.waitForNextSimulationTick();
-      expect(JSON.parse(room.state.lastRejection).reason).toBe('wrongRole');
-      clientB.send('runDecision', { go: false });
-      await room.waitForNextSimulationTick();
-      expect(JSON.parse(room.state.lastRejection).reason).toBe('wrongRole');
-    });
+    // RETIRED (documented in the Task-3 report): 'rejects a pitch from the
+    // batting side and accepts it from the fielding side' and 'rejects swing
+    // and runDecision from the fielding side' gated PLAYER play-messages by
+    // role. Those messages are tombstoned — no role can send them any more, so
+    // the role gates they tested no longer exist. Their rejection surface is
+    // covered by the tombstone test (both sides, exact prose); role gating on
+    // the SURVIVING messages (setPitcher/reposition/substitute/setBatter/
+    // draftPick) keeps its own wrongRole tests below and in M7/M8.
 
     it('delivers a rejected message ONLY to the offending client, never broadcasting it to the other', async () => {
       const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
@@ -946,7 +914,8 @@ describe('MatchRoom', () => {
       clientA.onMessage('rejected', (p: unknown) => rejectsA.push(p));
       clientB.onMessage('rejected', (p: unknown) => rejectsB.push(p));
 
-      // Side A bats first, so A pitching is a routine wrongRole rejection.
+      // Any pitch is now a routine tombstone rejection ('plays resolve
+      // automatically') — still targeted at the offender only, never broadcast.
       clientA.send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
       for (let i = 0; i < 10; i += 1) await room.waitForNextSimulationTick();
 
@@ -1022,8 +991,8 @@ describe('MatchRoom', () => {
       const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
       const { clientA, clientB } = await connectPair(room);
       await startPlay(room, clientA, clientB);
-      fieldingClient(room, clientA, clientB).send('pitch', { aim: { x: 0, y: 0, z: -1 }, spinInput: 0 });
-      await waitNearPlane(room); // ball demonstrably in flight
+      // The auto pitch beat puts the ball demonstrably in flight (no client pitch any more).
+      await waitForCondition(room, () => room.state.ballLive && room.state.ball.z > 1, 300);
       const token = clientB.reconnectionToken;
       await clientB.leave(false); // unconsented
       await waitForCondition(room, () => room.state.paused);
@@ -1031,7 +1000,8 @@ describe('MatchRoom', () => {
       for (let i = 0; i < 30; i += 1) await room.waitForNextSimulationTick();
       expect(room.state.ball.x).toBe(frozen.x);
       expect(room.state.ball.z).toBe(frozen.z);
-      // Gameplay is rejected while paused.
+      // Messages are rejected while paused — the paused-first check outranks
+      // even the tombstone prose (M6 ordering kept by the redesign brief).
       clientA.send('swing', { timing: 0, aim: { x: 0.55, y: 0.47, z: 0.65 }, spinInput: 0 });
       await room.waitForNextSimulationTick();
       expect(JSON.parse(room.state.lastRejection).reason).toBe('paused');
@@ -1040,6 +1010,38 @@ describe('MatchRoom', () => {
       expect(room.state.connectedB).toBe(true);
       await rejoined.leave();
     });
+
+    it('pause freezes the beats: no roll broadcasts while paused across ≥1 s real time, resuming on reconnect', async () => {
+      // NEW (auto-play redesign §7): beats compare against simTime, which the
+      // paused tick never advances — verified, not assumed. The drop lands
+      // BEFORE the first pitch beat (AUTOPLAY_PITCH_DELAY_S = 1 s), so a beat
+      // firing while paused would be caught as a roll broadcast / live ball.
+      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      const rolls: RollEvent[] = [];
+      clientA.onMessage('roll', (e: RollEvent) => rolls.push(e));
+      await startPlay(room, clientA, clientB);
+      const token = clientB.reconnectionToken;
+      await clientB.leave(false); // unconsented, immediately after PLAY entry
+      await waitForCondition(room, () => room.state.paused);
+      // The drop usually lands well inside the 1 s pitch delay (beat not yet
+      // fired); if the beat won that race the ball is frozen mid-flight —
+      // either way NOTHING may advance while paused, which is the invariant.
+      const rollsAtPause = rolls.length;
+      const frozen = { live: room.state.ballLive, x: room.state.ball.x, z: room.state.ball.z };
+      await new Promise((resolve) => setTimeout(resolve, 1200)); // > AUTOPLAY_PITCH_DELAY_S of real time
+      expect(rolls.length).toBe(rollsAtPause); // no roll broadcasts while frozen
+      expect(room.state.ballLive).toBe(frozen.live);
+      expect(room.state.ball.x).toBe(frozen.x);
+      expect(room.state.ball.z).toBe(frozen.z);
+
+      const rejoined = await colyseus.sdk.reconnect(token);
+      await waitForCondition(room, () => !room.state.paused);
+      // Unpaused: sim time resumes, beats resume — new rolls arrive (the pitch
+      // beat if it was still pending, otherwise the frozen flight's next beat).
+      await waitForCondition(room, () => rolls.length > rollsAtPause, 600);
+      await rejoined.leave();
+    }, 30000);
 
     it('a consented mid-game leave notifies the survivor and disposes the room', async () => {
       const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
@@ -1168,38 +1170,36 @@ describe('MatchRoom', () => {
     }, 20000);
 
     it('layout persists across an innings switch and returns intact next innings', async () => {
-      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_CATCH });
+      // Migrated from the ALWAYS_CATCH caught-per-play idiom: each innings now
+      // runs a VARIABLE number of plays (home re-queues under auto-running —
+      // see the innings-switch test), so the loops are capped generously and
+      // exit on the battingSide flip. After two full innings the game is at
+      // innings 3 of 4 — NEVER GAME_OVER — so the return-intact assertion is
+      // unconditional (the old version's `if` guard is gone: stronger, not
+      // weaker). Gates preserved: A's five field innings 2; josh's custom
+      // (5, 20) returns when B fields again.
+      const room = await colyseus.createRoom<MatchState>('match', { seed: SEED_FULL_GAME });
       const { clientA, clientB } = await connectPair(room);
       await waitForPhase(room, 'DRAFT');
       await draftSquads(room, clientA, clientB);
       clientB.send('reposition', { id: 'josh', x: 5, z: 20 });
       await waitForCondition(room, () => room.state.fielders.get('josh')?.x === 5);
-      // Bat out side A, then side B — back to A batting, B fielding. Uses the
-      // deterministic caught-at-the-bowler idiom of the M7 innings-switch test
-      // (ALWAYS_CATCH + flat drive at the bowling square = one out per play);
-      // the brief's flat midfield drive lands post-bounce (gathered, no out)
-      // and would never drain the queue.
       let plays = 0;
-      while (room.state.battingSide === 'A' && room.state.phase !== 'GAME_OVER' && plays < 8) {
-        await startPlay(room, clientA, clientB);
-        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
-        await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
+      while (room.state.battingSide === 'A' && room.state.phase !== 'GAME_OVER' && plays < 25) {
+        await drivePlay(room, clientA, clientB);
         plays += 1;
       }
       expect(room.state.battingSide).toBe('B');
       expect(room.state.fielders.get('joel')).toBeDefined(); // A's five field now
       plays = 0;
-      while (room.state.battingSide === 'B' && room.state.phase !== 'GAME_OVER' && plays < 8) {
-        await startPlay(room, clientA, clientB);
-        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
-        await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
+      while (room.state.battingSide === 'B' && room.state.phase !== 'GAME_OVER' && plays < 25) {
+        await drivePlay(room, clientA, clientB);
         plays += 1;
       }
-      if (room.state.phase !== 'GAME_OVER') {
-        expect(room.state.fielders.get('josh')?.x).toBe(5); // B's custom layout came back
-        expect(room.state.fielders.get('josh')?.z).toBe(20);
-      }
-    }, 120000);
+      expect(room.state.phase).not.toBe('GAME_OVER'); // innings 3 of 4
+      expect(room.state.fielders.get('josh')?.x).toBe(5); // B's custom layout came back
+      expect(room.state.fielders.get('josh')?.z).toBe(20);
+    }, 900000);
 
     it('substitute works with a real bench (fieldSlotsOverride) and syncs bench/count', async () => {
       const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS, fieldSlotsOverride: 3 });
@@ -1238,32 +1238,33 @@ describe('MatchRoom', () => {
     }, 20000);
 
     it('stamina persists across plays and the benched regain (ledger)', async () => {
-      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS, fieldSlotsOverride: 3 });
+      // Migrated from the aimed pitchThenSwing contact: every RESOLVED auto
+      // play had bat contact by construction (the no-contact branch respawns
+      // without resolving), so one drivePlay guarantees a chaser sprinted.
+      // Gate unchanged: some on-field fielder sits below stat stamina in the
+      // NEXT play's rebuilt setup — the ledger carried the drain across plays.
+      const room = await colyseus.createRoom<MatchState>('match', { seed: SEED_FULL_GAME, fieldSlotsOverride: 3 });
       const { clientA, clientB } = await connectPair(room);
       await waitForPhase(room, 'DRAFT');
       await draftSquads(room, clientA, clientB);
-      await startPlay(room, clientA, clientB);
-      await pitchThenSwing(room, clientA, clientB, { x: 0.55, y: 0.47, z: 0.65 });
-      await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
+      await drivePlay(room, clientA, clientB);
       // A chaser sprinted last play: SOME on-field fielder is below stat stamina next play.
       const drained = [...room.state.fielders.values()].some(
         (f) => f.stamina < (CHARACTERS.find((c) => c.id === f.id)?.stats.stamina ?? 0),
       );
       expect(drained).toBe(true);
-    }, 30000);
+    }, 120000);
   });
 
   // ---- M9: abilities (room wiring) -------------------------------------------
 
   describe('M9 abilities', () => {
-    it('WALL: a drive stops dead at the whale and the play resolves without a caught-from-stop', async () => {
-      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
-      const { clientA, clientB } = await connectPair(room);
-      await waitForPhase(room, 'DRAFT');
-
-      // Custom draft: B takes the whale FIRST, then kian. Among B's five
-      // (whale pitch 4, kian 8, josh 6, darcy 6, robbie 5) kian remains the
-      // best arm, so the default pitcher is unchanged from the standard draft.
+    /**
+     * Custom draft: B takes the whale FIRST, then kian. Among B's five
+     * (whale pitch 4, kian 8, josh 6, darcy 6, robbie 5) kian remains the
+     * best arm, so the default pitcher is unchanged from the standard draft.
+     */
+    async function draftWithWhale(room: TestRoom, clientA: TestClient, clientB: TestClient): Promise<void> {
       const picksA = ['carl', 'laurie', 'joel', 'jonty', 'joe'];
       const picksB = ['whale', 'kian', 'josh', 'darcy', 'robbie'];
       let a = 0;
@@ -1277,24 +1278,32 @@ describe('MatchRoom', () => {
         await waitForCondition(room, () => room.state.squadAIds.length + room.state.squadBIds.length > before);
       }
       await waitForPhase(room, 'INITIAL_POSITIONING');
+    }
+
+    it('WALL: a drive stops dead at the whale and the play resolves without a caught-from-stop', async () => {
+      // Migrated from ALWAYS_MISS + the aimed flat drive: tests can no longer
+      // aim, so the whale is parked on the PINNED seed's own play-1 hit
+      // corridor (SEED_WALL_SPOT — derived by the Task-3 search harness from
+      // this seed's observed hit direction, then pinned; the drive is
+      // deterministic, so he stands in its path every run). Gates preserved:
+      // the drive dies at the whale (blocker stop), the play still resolves,
+      // and the stop is never classified 'caught' — with real dice that means
+      // this seed's whale pCatch roll must FAIL, which the search verified.
+      const room = await colyseus.createRoom<MatchState>('match', { seed: SEED_WALL });
+      const { clientA, clientB } = await connectPair(room);
+      await waitForPhase(room, 'DRAFT');
+      await draftWithWhale(room, clientA, clientB);
       expect(room.state.currentPitcherId).toBe('kian');
       expect(room.state.fielders.get('whale')).toBeDefined();
 
-      // Park the whale DEEP on the corridor of the standard flat drive (M8
-      // reposition). Deep, not mid-pitch, deliberately: nearest to the rolling
-      // ball's predicted gather point he becomes the CHASER, whose pursuit runs
-      // ALONG the ball's x≈0 line — as post-1 cover (his role when parked
-      // nearer the batter) he instead drifts laterally towards post 1 while
-      // the ball approaches, and blocker contact becomes a jittery near-miss.
-      clientB.send('reposition', { id: 'whale', x: 0, z: 24 });
-      await waitForCondition(room, () => room.state.fielders.get('whale')?.z === 24);
+      clientB.send('reposition', { id: 'whale', x: SEED_WALL_SPOT.x, z: SEED_WALL_SPOT.z });
+      await waitForCondition(room, () => room.state.fielders.get('whale')?.z === SEED_WALL_SPOT.z);
 
       await startPlay(room, clientA, clientB);
-      await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
 
       // The drive must die at the whale: ball speed collapses while it is near him.
       let stoppedNearWhale = false;
-      for (let i = 0; i < 600 && room.state.phase === 'PLAY'; i += 1) {
+      for (let i = 0; i < 2400 && room.state.phase === 'PLAY'; i += 1) {
         await room.waitForNextSimulationTick();
         const whale = room.state.fielders.get('whale');
         if (whale === undefined || !room.state.ballLive) continue;
@@ -1304,59 +1313,34 @@ describe('MatchRoom', () => {
       }
       expect(stoppedNearWhale).toBe(true);
 
-      // The play still resolves, and the stop itself is never a catch
-      // (ALWAYS_MISS: no roll ever wins, so any 'caught' here could only come
-      // from the blocker contact being misclassified).
+      // The play still resolves, and the stop itself is never a catch.
       expect(room.state.phase).not.toBe('PLAY');
       const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
       expect(res.cause.kind).not.toBe('caught');
-    }, 30000);
+    }, 120000);
 
     it('WALL: the whale can throw the ball he gathered — his own blocker never pins the release (final-review fix)', async () => {
       // A held ball parks at the whale's hands, INSIDE his own armed blocker
       // capsule; a fresh flight released there pins against it (the physics-
       // level RED probe: 20 m/s → 1.8 m/s, stuck at ~0.4 m — see the
-      // PhysicsModule own-throw regression test). At room level the long hold
-      // keeps the ball↔capsule contact pair alive, so whether the release
-      // fired a fresh stop-dead event was contact-event JITTER pre-fix; this
-      // test pins the end-to-end contract — gather → hold → throw → the ball
-      // ESCAPES cleanly — which the flight-start exemption now guarantees.
-      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_CATCH });
+      // PhysicsModule own-throw regression test). Gates preserved: gather →
+      // hold → throw → the ball ESCAPES cleanly. Migrated from the
+      // ALWAYS_CATCH + whale-as-pitcher + aimed-grounder choreography: the
+      // pinned seed parks the whale on his own play-1 hit corridor (same
+      // SEED_WALL/SEED_WALL_SPOT as the stop-dead test — the search verified
+      // that on THIS seed the blocker-stopped ball is then GATHERED by the
+      // whale himself, held, thrown, and escapes).
+      const room = await colyseus.createRoom<MatchState>('match', { seed: SEED_WALL_THROW });
       const { clientA, clientB } = await connectPair(room);
       await waitForPhase(room, 'DRAFT');
-
-      // Custom draft: B takes the whale FIRST, then kian (still the default
-      // pitcher among B's five — same idiom as the stop-dead test above).
-      const picksA = ['carl', 'laurie', 'joel', 'jonty', 'joe'];
-      const picksB = ['whale', 'kian', 'josh', 'darcy', 'robbie'];
-      let a = 0;
-      let b = 0;
-      while (room.state.draftTurn !== '') {
-        const turn = room.state.draftTurn;
-        const id = (turn === 'A' ? picksA[a++] : picksB[b++]) ?? '';
-        const picker = turn === 'A' ? clientA : clientB;
-        const before = room.state.squadAIds.length + room.state.squadBIds.length;
-        picker.send('draftPick', { id });
-        await waitForCondition(room, () => room.state.squadAIds.length + room.state.squadBIds.length > before);
-      }
-      await waitForPhase(room, 'INITIAL_POSITIONING');
-
-      // Nominate the whale as PITCHER: pinned alone on the bowling square, so
-      // the drive-at-the-bowler corridor has no competing ALWAYS_CATCH fielder
-      // between the bat and him (kian returns to his slot-1 backstop layout
-      // spot, BEHIND the batter). The −2 aim (clamped to −10°) grounds the
-      // drive ~2.6 m out, so the whale's pickup is post-bounce: gathered on
-      // the first radius entry, never a play-ending caught-out.
-      clientB.send('setPitcher', { id: 'whale' });
-      await waitForCondition(room, () => room.state.currentPitcherId === 'whale');
+      await draftWithWhale(room, clientA, clientB);
+      clientB.send('reposition', { id: 'whale', x: SEED_WALL_THROW_SPOT.x, z: SEED_WALL_THROW_SPOT.z });
+      await waitForCondition(room, () => room.state.fielders.get('whale')?.z === SEED_WALL_THROW_SPOT.z);
 
       await startPlay(room, clientA, clientB);
-      await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0, -2);
 
       // Gather (hasBall flips true), then the delayed release (flips false).
-      // The batter-runner is mid-circuit throughout (~9 s vs the ~2 s gather),
-      // so a live target post exists and the whale's throw is released.
-      await waitForCondition(room, () => room.state.fielders.get('whale')?.hasBall === true, 600);
+      await waitForCondition(room, () => room.state.fielders.get('whale')?.hasBall === true, 2400);
       await waitForCondition(room, () => room.state.fielders.get('whale')?.hasBall === false, 600);
 
       // The thrown ball must ESCAPE the whale: clear of him and still
@@ -1372,71 +1356,141 @@ describe('MatchRoom', () => {
         if (d > 3 && speed > 5) escaped = true;
       }
       expect(escaped).toBe(true);
-    }, 30000);
-
-    it('CLUTCH_SWING: carl’s identical drive leaves the bat faster in the final innings than in innings 1', async () => {
-      // exitVelocity(power 8, t) ≤ 34 m/s in innings 1; in the final innings
-      // CLUTCH adds +3 (uncapped power 11 → 43·t) with pressureMult(nerve 8)
-      // = 0.97 on timing, so even worst-case timing jitter (t ≥ ~0.84 under
-      // the near-plane harness) keeps the final drive ≥ ~35 m/s — a real
-      // margin over the innings-1 ceiling. Compare measured to measured.
-      const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_CATCH });
-      const { clientA, clientB } = await connectPair(room);
-
-      /** |ball velocity| on the first synced tick after contact (vz flips positive). */
-      async function exitSpeed(): Promise<number> {
-        for (let i = 0; i < 30; i += 1) {
-          if (room.state.ball.vz > 1) {
-            return Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
-          }
-          await room.waitForNextSimulationTick();
-        }
-        throw new Error('exit velocity never observed');
-      }
-
-      // Innings 1, play 1: carl opens with the flat drive at the bowler
-      // (ALWAYS_CATCH — caught, which is also the queue-drain idiom).
-      await startPlay(room, clientA, clientB);
-      expect(room.state.inningsIndex).toBe(0);
-      expect(room.state.currentBatterId).toBe('carl');
-      await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
-      const inningsOneSpeed = await exitSpeed();
-      await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
-
-      // Drain the first innings pair (A then B, one caught batter per play)
-      // until A's SECOND innings — the final pair, where isFinalInnings holds.
-      let plays = 0;
-      while (room.state.inningsIndex < 2 && room.state.phase !== 'GAME_OVER' && plays < 12) {
-        await startPlay(room, clientA, clientB);
-        await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
-        await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
-        plays += 1;
-      }
-      expect(room.state.inningsIndex).toBe(2);
-      expect(room.state.battingSide).toBe('A');
-
-      // Final innings: make sure carl bats (fresh queue should open with him;
-      // setBatter guards against any other rotation).
-      if (room.state.currentBatterId !== 'carl') {
-        battingClient(room, clientA, clientB).send('setBatter', { id: 'carl' });
-        await waitForCondition(room, () => room.state.currentBatterId === 'carl');
-      }
-      await startPlay(room, clientA, clientB);
-      await pitchThenSwingAtTarget(room, clientA, clientB, FIELD.BOWLING_SQUARE, 0);
-      const finalInningsSpeed = await exitSpeed();
-      await waitForCondition(room, () => room.state.phase !== 'PLAY', 800);
-
-      // Discriminate against the ABSOLUTE no-clutch ceiling, not just the
-      // measured innings-1 swing: harness timing jitter moves each single
-      // capture by a few m/s, so measured-vs-measured margins flake in both
-      // directions. Without CLUTCH carl's drive can NEVER exceed
-      // exitVelocity(8, 1) = 34.0 m/s — and in the final innings pressureMult
-      // (nerve 8 → 0.97) caps it at 33.0. With +3 (power 11, uncapped) the same
-      // swing reaches ~41.7 at perfect timing, so > 34.2 is only reachable via
-      // the bonus, with the timing draw needing t > 0.82 (observed 0.85–1.0).
-      expect(inningsOneSpeed).toBeLessThan(34.05); // sanity: no bonus in innings 1
-      expect(finalInningsSpeed).toBeGreaterThan(34.2); // impossible without CLUTCH_SWING
-      expect(finalInningsSpeed).toBeGreaterThan(inningsOneSpeed); // and higher than the identical innings-1 drive
     }, 120000);
+
+    it('CLUTCH_SWING: carl’s final-innings drive matches the +3-power prediction, his innings-1 drive the plain one', async () => {
+      // Migrated from the ALWAYS_CATCH + aimed-drive exit-speed comparison.
+      // Two things changed shape:
+      // (1) timing is a sampled draw now, so the old fixed ">34.2 m/s" gate
+      //     would demand a LUCKY draw (|err| ≲ 0.04 s, ~14% per game) — pure
+      //     flake bait, especially ~11 plays deep where real-time tick jitter
+      //     makes the draw sequence non-reproducible run-to-run (observed in
+      //     the Task-3 sweeps).
+      // (2) The swing RollEvent broadcasts the draw itself, so the test can
+      //     compute BOTH hypotheses for the very swing it measured:
+      //     exitVelocity(8, t) (no bonus) v exitVelocity(11, t) (CLUTCH +3) —
+      //     26% apart at ANY timing draw. The gate is therefore STRONGER, not
+      //     weaker: the measured exit must sit inside the clutch prediction
+      //     band and clear of the no-clutch band in the final innings, and the
+      //     REVERSE in innings 1 (no bonus there). Only carl's contact itself
+      //     is chancy (~1 in 4 misses), so up to three games (rematch keeps
+      //     squads) bound the retry; each measured play is asserted in full.
+      const room = await colyseus.createRoom<MatchState>('match', { seed: SEED_CLUTCH });
+      const { clientA, clientB } = await connectPair(room);
+      const rolls: RollEvent[] = [];
+      clientA.onMessage('roll', (e: RollEvent) => rolls.push(e));
+      const carl = getCharacter('carl');
+
+      /** Prediction band for carl's measured exit given his swing roll: [low, high] for a power. */
+      function band(power: number, swing: RollEvent): [number, number] {
+        const absErr = swing.roll * CONST.GAME.AUTOPLAY_TIMING_NOISE_S; // roll = |err| / noise
+        const t = timingFactor(absErr, swing.threshold); // threshold = the effective window
+        // Pressure is not directly observable: bound with and without
+        // pressureMult(nerve). Margins: −7% (sampling a few damped ticks after
+        // the hit) / +2% (float slack).
+        const low = exitVelocity(power, t * pressureMult(carl.stats.nerve)) * 0.93;
+        const high = exitVelocity(power, t) * 1.02;
+        return [low, high];
+      }
+
+      /**
+       * Drive one play; if carl's swing connects, return the measured exit
+       * speed and his swing roll, else null (missed — no measurement).
+       */
+      async function playAndMeasure(): Promise<{ exit: number; swing: RollEvent } | null> {
+        // BROADCAST-RACE guard (check-run finding): the rolls collector is
+        // client-side and broadcasts land ASYNCHRONOUSLY — under suite load a
+        // previous play's rolls can still be in flight. Settle the backlog
+        // BEFORE marking this play's start index (no new rolls fire between
+        // plays), else a late-arriving earlier swing gets misattributed and
+        // the bands are derived from the wrong draw.
+        for (let i = 0; i < 10; i += 1) {
+          const before = rolls.length;
+          await room.waitForNextSimulationTick();
+          if (rolls.length === before) break;
+        }
+        const rollStart = rolls.length;
+        await startPlay(room, clientA, clientB);
+        let exit = 0;
+        let prevVz = 0;
+        for (let i = 0; i < 2400 && room.state.phase === 'PLAY'; i += 1) {
+          await room.waitForNextSimulationTick();
+          // Sample validity (probe findings — each guard closed a REAL polluted
+          // sample): the ONLY event that flips the polled ball from a strongly
+          // negative vz (the incoming pitch) to a positive one is the bat
+          // contact itself, so a genuine exit sample requires that transition
+          // ACROSS CONSECUTIVE POLLS plus near-source position (z < 2 m).
+          // Without the transition guard, a backstop's post-gather throw
+          // (launched near z ≈ −3 towards a post, prev poll = held ball at
+          // vz 0) or a lag-delayed read of the bounced, damped flight
+          // masqueraded as the exit (observed 19.03 v ceiling 16.84 and 10.75
+          // v floor 16.5 respectively). The guards can never reject a genuine
+          // sample — the pitch always shows the poll loop several vz ≈ −20
+          // frames first; a play whose sampling window was straddled entirely
+          // by a lagging poll yields null and is RETRIED via the game loop,
+          // never asserted.
+          const vz = room.state.ball.vz;
+          if (exit === 0 && prevVz < -5 && vz > 1 && room.state.ball.z < 2) {
+            exit = Math.hypot(room.state.ball.vx, room.state.ball.vy, vz);
+          }
+          prevVz = vz;
+        }
+        // The connecting swing's roll may still be in flight when the play
+        // ends (server-side phase read v client-side delivery): wait for it.
+        let swing: RollEvent | undefined;
+        for (let i = 0; i < 60 && swing === undefined; i += 1) {
+          swing = rolls.slice(rollStart).filter((r) => r.contest === 'swing' && r.success).pop();
+          if (swing === undefined) await room.waitForNextSimulationTick();
+        }
+        if (exit === 0 || swing === undefined) return null;
+        return { exit, swing };
+      }
+
+      let clutchProven = false;
+      for (let game = 0; game < 3 && !clutchProven; game += 1) {
+        if (game > 0) {
+          clientA.send('rematch');
+          await waitForPhase(room, 'INITIAL_POSITIONING');
+        }
+        // Innings 1, play 1: carl opens (fresh queue = pick order).
+        await startPlay(room, clientA, clientB); // walks draft on game 0, no-op wait otherwise
+        expect(room.state.inningsIndex).toBe(0);
+        expect(room.state.currentBatterId).toBe('carl');
+        const first = await playAndMeasure();
+        if (first !== null) {
+          // No bonus in innings 1: inside the plain band, clear of the clutch band.
+          const [plainLow, plainHigh] = band(carl.stats.power, first.swing);
+          const [clutchLow] = band(carl.stats.power + CONST.ABILITY.CLUTCH_POWER_BONUS, first.swing);
+          expect(first.exit).toBeGreaterThanOrEqual(plainLow);
+          expect(first.exit).toBeLessThanOrEqual(plainHigh);
+          expect(first.exit).toBeLessThan(clutchLow);
+        }
+
+        // Drain to A's SECOND innings — the final pair, where isFinalInnings
+        // holds. Innings length is variable (home re-queues), hence the cap.
+        let plays = 0;
+        while (room.state.inningsIndex < 2 && room.state.phase !== 'GAME_OVER' && plays < 40) {
+          await drivePlay(room, clientA, clientB);
+          plays += 1;
+        }
+        expect(room.state.inningsIndex).toBe(2);
+        expect(room.state.battingSide).toBe('A');
+        if (room.state.currentBatterId !== 'carl') {
+          battingClient(room, clientA, clientB).send('setBatter', { id: 'carl' });
+          await waitForCondition(room, () => room.state.currentBatterId === 'carl');
+        }
+        const final = await playAndMeasure();
+        if (final !== null) {
+          // CLUTCH's +3: inside the clutch band, clear of the plain band.
+          const [clutchLow, clutchHigh] = band(carl.stats.power + CONST.ABILITY.CLUTCH_POWER_BONUS, final.swing);
+          const [, plainHigh] = band(carl.stats.power, final.swing);
+          expect(final.exit).toBeGreaterThanOrEqual(clutchLow);
+          expect(final.exit).toBeLessThanOrEqual(clutchHigh);
+          expect(final.exit).toBeGreaterThan(plainHigh);
+          clutchProven = true;
+        }
+      }
+      expect(clutchProven).toBe(true); // carl connected in SOME final innings within three games
+    }, 900000);
   });
 });
