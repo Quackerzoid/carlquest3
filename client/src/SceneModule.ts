@@ -163,7 +163,7 @@ export function createScene(canvas: HTMLCanvasElement) {
   // bowling direction (+z) and every chalk marking is drawn from CONST.FIELD.
   {
     const S = 2048;
-    const G = FIELD.GROUND_HALF_EXTENT; // 40
+    const G = FIELD.GROUND_HALF_EXTENT; // 80 (x2 field)
     const px = (x: number): number => ((x + G) / (2 * G)) * S;
     const pz = (z: number): number => ((z + G) / (2 * G)) * S;
     const m = S / (2 * G); // canvas px per metre
