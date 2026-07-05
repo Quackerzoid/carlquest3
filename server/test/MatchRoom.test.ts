@@ -22,7 +22,29 @@ type TestRoom = Room<MatchState>;
 /** Client-side room handle as returned by `colyseus.connectTo<MatchState>(...)`. */
 type TestClient = ClientRoom<MatchState>;
 
-const { FIELD } = CONST;
+const { FIELD, GAME, PHYSICS } = CONST;
+
+/**
+ * Tick budgets (2026-07-05 readable-game overhaul): the room ticks at 60 Hz
+ * REAL time and sim time advances by the real dt, so N sim-seconds cost about
+ * 60·N waitForNextSimulationTick calls. Budgets DERIVE from the pacing
+ * constants (never hardcoded tick counts) and carry 2× headroom for
+ * event-loop load — waits exit early on success, so generosity is free.
+ */
+const ticksFor = (simSeconds: number): number => Math.ceil(simSeconds * 60 * 2);
+/**
+ * Worst-case sim length of ONE play: up to this many no-contact loops (pitch
+ * delay + ~2 s of flight + the fast miss-respawn) before a swing connects,
+ * then a full post-contact flight to the PLAY_TIMEOUT_S settle, then the
+ * outcome hold. Seeded plays connect far sooner; this is the failure bound.
+ */
+const MAX_REPITCH_LOOPS = 8;
+const PLAY_SIM_BUDGET_S =
+  (GAME.AUTOPLAY_PITCH_DELAY_S + GAME.MISS_RESPAWN_S + 2) * MAX_REPITCH_LOOPS +
+  GAME.PLAY_TIMEOUT_S +
+  GAME.OUTCOME_HOLD_S +
+  2;
+const PLAY_TICK_BUDGET = ticksFor(PLAY_SIM_BUDGET_S);
 
 /**
  * The deterministic table-order draft that draftSquads (below) always produces:
@@ -53,11 +75,14 @@ const ALWAYS_MISS = (): number => 0.999;
 
 /**
  * Pinned seeds for outcome-specific auto-play tests (M4/M5 precedent for
- * legitimate seed selection): found by a bounded sweep of seeds 1–30 with the
- * Task-3 scratch harness (two test clients, deterministic table-order draft,
- * plays driven purely by the room's own beats), then pinned. Each constant
- * names the behaviour its seed exhibits ON ITS FIRST PLAY(S) so a formula or
- * roster change that invalidates one fails loudly here, not flakily elsewhere.
+ * legitimate seed selection): RE-DERIVED for the 2026-07-05 readable-game
+ * overhaul (the loft draw shifted the shared rng stream and the ×2 field
+ * changed flight/run ratios) by a bounded sweep of seeds 1–8 with the Task-2
+ * scratch harness (two test clients, deterministic table-order draft, the
+ * first four plays of each seed driven purely by the room's own beats — all
+ * outcome classes appeared well inside the ≤30-seed bound). Each constant
+ * names the behaviour its seed exhibited so a formula or roster change that
+ * invalidates one fails loudly here, not flakily elsewhere.
  */
 /** Seed 2, play 1: carl connects on the first pitch and parks safe at post 3 (+1 half). */
 const SEED_FIRST_PLAY_CONTACT = 2;
@@ -65,15 +90,18 @@ const SEED_FIRST_PLAY_SAFE = 2;
 const SEED_HALF_ROUNDER = 2;
 /** Seed 2 again: play 1 parks carl safe; play 2 (laurie) connects → two runners coexist. */
 const SEED_TWO_RUNNERS = 2;
-/** Seed 7, play 1: carl's drive is caught pre-bounce (first pitch, no re-pitch loops). */
-const SEED_FIRST_PLAY_CAUGHT = 7;
 /**
- * Seed 16: run-out DENSE — the sweep observed all three of its opening plays
- * resolving runOut with a fielder holding the ball first (gather → throw →
- * run-out), so the bounded outcome loops match almost immediately.
+ * Seed 5, play 1: carl's lofted drive is caught pre-bounce by robbie ~29 m
+ * out (play 4 is caught too — two chances inside the bounded window).
  */
-const SEED_FIRST_PLAY_RUNOUT = 16;
-const SEED_THROW_RUNOUT = 16;
+const SEED_FIRST_PLAY_CAUGHT = 5;
+/**
+ * Seed 7: run-out dense — plays 2 AND 4 of the sweep resolved runOut with a
+ * fielder holding the ball first (gather → throw → run-out), so the bounded
+ * outcome loops match quickly.
+ */
+const SEED_FIRST_PLAY_RUNOUT = 7;
+const SEED_THROW_RUNOUT = 7;
 /**
  * Full-game seed: verified to run to GAME_OVER with a definite winner. The
  * exact winner is NOT pinned: deep plays are not exactly reproducible under
@@ -82,22 +110,36 @@ const SEED_THROW_RUNOUT = 16;
  */
 const SEED_FULL_GAME = 1;
 /**
- * WALL seeds: the whale is parked 12 m along the pinned seed's OWN play-1 hit
- * corridor (the auto swing aims at a post, so the corridor is the batting
- * square → that post's direction; the spots were derived by the Task-3 search
- * harness from the observed deterministic play-1 hit and then pinned).
- * Seed 2: the drive dies on the whale's blocker WITHOUT him ever holding it
- * (pure stop; his pCatch roll fails; play resolves safe). Seed 6: the stopped
- * ball is then GATHERED by the whale, held, thrown and escapes (runOut).
+ * Relay seed: seed 5's play 3 exhibited a THREE-link hold chain
+ * (josh → kian → ricy) ending in a run-out — a throw → reception → re-throw
+ * sequence for the relay/reception room test.
  */
-const SEED_WALL = 2;
-const SEED_WALL_SPOT = { x: 9.8, z: 6.9 };
-const SEED_WALL_THROW = 6;
-const SEED_WALL_THROW_SPOT = { x: 3.6, z: 11.4 };
+const SEED_RELAY = 5;
+/** Loft seed: seed 1's very first hit ballooned to a 22 m apex. */
+const SEED_LOFT = 1;
+/**
+ * WALL seeds: the whale is parked on the pinned seed's OWN play-1 hit
+ * corridor — re-derived for the ×2/loft world by the Task-2 sweep (the
+ * standard-draft play-1 trajectory is identical under the whale draft: same
+ * rng stream head, and failed catch rolls never touch the ball). The spots
+ * are TAIL-of-roll samples (~6–7 m/s ground rolls, 18–20 m out): parked
+ * mid-corridor the whale CHASED into the descending flight and caught it
+ * pre-bounce (first search round, rejected); from the tail his chase
+ * intercept is structurally POST-bounce, so a won roll classifies gathered —
+ * never caught — by construction AND live verification. Both verified with
+ * the whale-draft harness: blocker/gather stop observed (speed < 0.5 within
+ * 1.5 m of him), then gather → hold → throw → clean escape; seed 7 resolved
+ * safe, seed 8 runOut off the whale's own throw.
+ */
+const SEED_WALL = 7;
+const SEED_WALL_SPOT = { x: 16.5, z: 10.3 };
+const SEED_WALL_THROW = 8;
+const SEED_WALL_THROW_SPOT = { x: 15.1, z: 10.9 };
 /**
  * CLUTCH seed: only carl's CONTACT matters (the gate derives both power
  * hypotheses from the broadcast swing roll itself), retried across up to
- * three rematches; seed pinned for a fast, contact-rich first game.
+ * three rematches; seed pinned for a contact-rich first game (all four sweep
+ * plays connected).
  */
 const SEED_CLUTCH = 2;
 
@@ -126,6 +168,35 @@ async function waitForCondition(room: TestRoom, cond: () => boolean, maxTicks = 
     await room.waitForNextSimulationTick();
   }
   throw new Error('condition not reached');
+}
+
+/**
+ * The parked-ball schema state that finalisePlay repaints (spawnBall +
+ * syncBall): bowling square at release height, i.e. the outcome hold is over.
+ * A DEAD flight can never show these exact coordinates — a resting ball sits
+ * at ground height, never at release height over the bowling square — so this
+ * is a race-free finalise signal readable from the schema alone.
+ */
+function ballParked(room: TestRoom): boolean {
+  const b = room.state.ball;
+  return (
+    Math.abs(b.x - FIELD.BOWLING_SQUARE.x) < 1e-9 &&
+    Math.abs(b.y - PHYSICS.BALL_RELEASE_HEIGHT) < 1e-9 &&
+    Math.abs(b.z - FIELD.BOWLING_SQUARE.z) < 1e-9
+  );
+}
+
+/**
+ * Wait out the outcome hold (2026-07-05 readable-game overhaul): after the
+ * playOutcome broadcast the schema deliberately keeps the death tableau for
+ * OUTCOME_HOLD_S sim-seconds; only finalisePlay respawns the ball, settles the
+ * runner schema and rebuilds the fielder slots. Every drive helper absorbs the
+ * hold before returning, so post-play assertions read the FINALISED world —
+ * the exact same facts the pre-overhaul tests asserted, observed later. The
+ * dedicated outcome-hold test observes the frozen tableau itself.
+ */
+async function waitForFinalise(room: TestRoom): Promise<void> {
+  await waitForCondition(room, () => ballParked(room), ticksFor(GAME.OUTCOME_HOLD_S + 2));
 }
 
 /**
@@ -179,18 +250,22 @@ async function startPlay(room: TestRoom, clientA: TestClient, clientB: TestClien
 }
 
 /**
- * Poll until the current play resolves (phase leaves PLAY), returning the parsed
- * resolution. Auto-play: a play may loop through several no-contact re-pitches
- * (pitch beat +1 s → flight ~0.3 s → rest ~1 s → re-schedule) before one
- * connects and resolves, so the tick budget is generous.
+ * Poll until the current play resolves (phase leaves PLAY), then wait out the
+ * outcome hold (see waitForFinalise), returning the parsed resolution.
+ * Auto-play: a play may loop through several no-contact re-pitches (pitch
+ * beat AUTOPLAY_PITCH_DELAY_S → flight → MISS_RESPAWN_S fast respawn →
+ * re-schedule) before one connects and resolves, so the tick budget is the
+ * derived worst-case play budget.
  */
-async function waitPlayEnd(room: TestRoom, maxTicks = 2400): Promise<PlayResolution> {
+async function waitPlayEnd(room: TestRoom, maxTicks = PLAY_TICK_BUDGET): Promise<PlayResolution> {
   for (let i = 0; i < maxTicks; i += 1) {
     await room.waitForNextSimulationTick();
     if (room.state.phase !== 'PLAY') break;
   }
   if (room.state.phase === 'PLAY') throw new Error('play did not resolve in time');
-  return JSON.parse(room.state.lastOutcome) as PlayResolution;
+  const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
+  await waitForFinalise(room);
+  return res;
 }
 
 /** startPlay + waitPlayEnd: one whole automated play, no client play-messages. */
@@ -205,8 +280,18 @@ interface PlayFacts {
   batter: string;
   /** Every fielder observed holding the ball during the play. */
   holders: Set<string>;
+  /** Ordered hold sequence (consecutive duplicates collapsed) — relay/reception chains. */
+  holderSeq: string[];
   /** Peak simultaneous runner count observed during the play. */
   maxRunners: number;
+  /** True once the auto swing was observed connecting (vz sign flip near the square). */
+  contact: boolean;
+  /** Ball position at the observed contact tick (lags the true launch by ≤1 poll tick). */
+  launch: { x: number; z: number } | null;
+  /** Highest ball y observed post-contact while live (loft evidence; the old 0° world stayed ≈ launch height). */
+  maxBallY: number;
+  /** Ball schema position at the death tick (synced on the resolution tick, then frozen by the hold). */
+  deathBall: { x: number; y: number; z: number };
 }
 
 /**
@@ -231,18 +316,40 @@ async function drivePlayUntil(
   for (let p = 0; p < maxPlays; p += 1) {
     const batter = room.state.currentBatterId;
     const holders = new Set<string>();
+    const holderSeq: string[] = [];
     let maxRunners = 0;
+    let contact = false;
+    let launch: { x: number; z: number } | null = null;
+    let maxBallY = 0;
+    let prevVz = 0;
     await startPlay(room, clientA, clientB);
-    for (let i = 0; i < 2400 && room.state.phase === 'PLAY'; i += 1) {
+    for (let i = 0; i < PLAY_TICK_BUDGET && room.state.phase === 'PLAY'; i += 1) {
       await room.waitForNextSimulationTick();
+      const b = room.state.ball;
       for (const f of room.state.fielders.values()) {
-        if (f.hasBall) holders.add(f.id);
+        if (f.hasBall) {
+          holders.add(f.id);
+          if (holderSeq[holderSeq.length - 1] !== f.id) holderSeq.push(f.id);
+        }
       }
       if (room.state.runners.size > maxRunners) maxRunners = room.state.runners.size;
+      // Contact detection (the CLUTCH test's proven guard set): only the bat
+      // flips the polled ball from the incoming pitch's strongly negative vz
+      // to a positive one near the batting square.
+      if (!contact && prevVz < -5 && b.vz > 1 && b.z < 2) {
+        contact = true;
+        launch = { x: b.x, z: b.z };
+      }
+      prevVz = b.vz;
+      if (contact && room.state.ballLive && b.y > maxBallY) maxBallY = b.y;
     }
     if (room.state.phase === 'PLAY') throw new Error('play did not resolve in time');
     const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
-    const facts = { batter, holders, maxRunners };
+    // Capture the death tableau's ball BEFORE absorbing the outcome hold —
+    // finalisePlay repaints it to the parked spawn state.
+    const deathBall = { x: room.state.ball.x, y: room.state.ball.y, z: room.state.ball.z };
+    await waitForFinalise(room);
+    const facts = { batter, holders, holderSeq, maxRunners, contact, launch, maxBallY, deathBall };
     if (match(res, facts)) return { res, ...facts };
   }
   throw new Error(`no play matched the outcome predicate within ${maxPlays} plays`);
@@ -345,11 +452,11 @@ describe('MatchRoom', () => {
     expect(room.state.battingSide).toBe('A'); // still innings 1 (≤4 plays cannot drain the queue)
     expect(room.state.outs).toBeGreaterThanOrEqual(1);
     expect(room.state.currentBatterId).not.toBe(batter); // the caught batter rotated off
-  }, 120000);
+  }, 300000);
 
   // ---- Auto pitch beat -------------------------------------------------------
 
-  it('the pitch beat fires itself ~1 s after PLAY entry: ball live at stat-derived speed, pitch roll broadcast', async () => {
+  it('the pitch beat fires itself ~AUTOPLAY_PITCH_DELAY_S after PLAY entry: ball live at stat-derived speed, pitch roll broadcast', async () => {
     // Migrated from 'pitch while in PLAY makes the ball live…': the delivery
     // is now the room's own beat — no client message. Same speed band gate
     // (kian pitch 8 → 26.4 m/s minus damping); additionally pins the pitch
@@ -364,7 +471,7 @@ describe('MatchRoom', () => {
     await waitForCondition(
       room,
       () => room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0,
-      300,
+      ticksFor(GAME.AUTOPLAY_PITCH_DELAY_S + 2),
     );
     const speed = Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
     expect(speed).toBeGreaterThan(20); // Kian pitch 8 → 26.4 m/s minus a tick of damping
@@ -387,7 +494,7 @@ describe('MatchRoom', () => {
     });
     await startPlay(room, clientA, clientB);
     let sawHitFlight = false;
-    for (let i = 0; i < 2400 && room.state.phase === 'PLAY'; i += 1) {
+    for (let i = 0; i < PLAY_TICK_BUDGET && room.state.phase === 'PLAY'; i += 1) {
       await room.waitForNextSimulationTick();
       if (room.state.ball.vz > 1) sawHitFlight = true;
     }
@@ -397,7 +504,7 @@ describe('MatchRoom', () => {
     expect(['caught', 'runOut', 'rounder', 'safe']).toContain(res.cause.kind);
     await room.waitForNextSimulationTick();
     expect(received).toEqual(res); // broadcast parity
-  }, 60000);
+  }, 300000);
 
   it('broadcasts rolls in beat order within a play: pitch first, then swing, then only run/catch', async () => {
     // NEW (auto-play redesign §7): the dice moments arrive in contest order.
@@ -431,7 +538,7 @@ describe('MatchRoom', () => {
     // The connected play's swing roll reports success (presentation = reality).
     const lastSwing = [...rolls].reverse().find((r) => r.contest === 'swing');
     expect(lastSwing?.success).toBe(true);
-  }, 60000);
+  }, 300000);
 
   // ---- Tombstoned player play-messages ---------------------------------------
 
@@ -464,8 +571,8 @@ describe('MatchRoom', () => {
     for (const r of [...rejectsA, ...rejectsB]) expect(r.reason).toBe('plays resolve automatically');
 
     // Still alive: the pitch beat delivers regardless of the junk above.
-    await waitForCondition(room, () => room.state.ballLive, 300);
-  }, 20000);
+    await waitForCondition(room, () => room.state.ballLive, ticksFor(GAME.AUTOPLAY_PITCH_DELAY_S + 2));
+  }, 60000);
 
   // ---- Running -------------------------------------------------------------
 
@@ -476,13 +583,19 @@ describe('MatchRoom', () => {
     const room = await colyseus.createRoom('match', { seed: SEED_FIRST_PLAY_CONTACT });
     const { clientA, clientB } = await connectPair(room);
     await startPlay(room, clientA, clientB);
-    await waitForCondition(room, () => room.state.runners.size > 0, 600);
+    // Budget: the contact seed's connect may still take a couple of re-pitch
+    // loops under jitter (pitch delay + flight + miss respawn per loop).
+    await waitForCondition(
+      room,
+      () => room.state.runners.size > 0,
+      ticksFor(3 * (GAME.AUTOPLAY_PITCH_DELAY_S + GAME.MISS_RESPAWN_S + 2)),
+    );
     const runner = room.state.runners.get(OPENER_ID);
     expect(runner).toBeDefined();
     expect(runner?.running).toBe(true);
     expect(runner?.atPost).toBe(-1);
     expect(runner?.out).toBe(false);
-  }, 30000);
+  }, 120000);
 
   it('an auto run decision can park the runner safe at a post, ending the play there', async () => {
     // Migrated from 'runDecision {go:false} halts the runner at post 1…': the
@@ -504,13 +617,13 @@ describe('MatchRoom', () => {
     expect(runner?.out).toBe(false);
     expect(res.outs).toEqual([]);
     expect(res.scoreDeltaHalves).toBe(safe.atPost >= 2 ? 1 : 0); // half-rounder line is post 2
-  }, 120000);
+  }, 300000);
 
   // ---- Run-out detection (migrated) ----------------------------------------
 
   it('the ball reaching an exposed post while the runner is mid-segment is a run-out', async () => {
     // Migrated from 'a hit flown directly at an exposed post…': tests can no
-    // longer aim the hit, so a pinned seed whose first play resolves runOut
+    // longer aim the hit, so a pinned seed with runOut-dense opening plays
     // exhibits the same detection path (exposure-scoped sensor crossing or
     // holder-at-post). Gates preserved: runOut cause naming the batter-runner
     // and the post, the runner in outs, broadcast parity, ball dead, fielders
@@ -534,10 +647,12 @@ describe('MatchRoom', () => {
     expect(res.outs).toContain(runOut.runnerId);
     expect(room.state.ballLive).toBe(false);
     expect(received).toEqual(res);
+    // drivePlayUntil absorbed the outcome hold, so the fielders are REBUILT
+    // here (2026-07-05: the slot return happens at finalise, not resolve).
     const bowler = room.state.fielders.get('kian'); // still innings 1: B fields, kian re-slotted
     expect(bowler?.x).toBeCloseTo(FIELD.BOWLING_SQUARE.x, 9);
     expect(bowler?.z).toBeCloseTo(FIELD.BOWLING_SQUARE.z, 9);
-  }, 120000);
+  }, 300000);
 
   // RETIRED (documented in the Task-3 report): the two stale-crossing
   // choreography tests ('a stale post crossing from earlier in flight…' and
@@ -576,7 +691,7 @@ describe('MatchRoom', () => {
     expect(room.state.outs).toBeGreaterThanOrEqual(1); // still innings 1 within the window
     expect(room.state.ballLive).toBe(false);
     expect(received).toEqual(res);
-  }, 120000);
+  }, 300000);
 
   it('a gathered ball is thrown at the exposed post for a run-out (full throw pipeline)', async () => {
     // Migrated from the corridor-gather custom-rng choreography (a state-
@@ -610,7 +725,7 @@ describe('MatchRoom', () => {
     expect(res.outs.length).toBe(1);
     expect(room.state.ballLive).toBe(false);
     expect(received).toEqual(res);
-  }, 240000);
+  }, 900000);
 
   // ---- Rejection matrix (structured broadcast) -----------------------------
 
@@ -677,8 +792,9 @@ describe('MatchRoom', () => {
 
   it('an own-hit runner who reaches post ≥2 banks a half-rounder (scoreHalves +1)', async () => {
     // A full rounder (home, +2 halves, batter re-queues) remains unreachable in
-    // the room (circuit ~57.75 m vs PLAY_TIMEOUT_S 6 s — RulesModule unit tests
-    // cover it); the reachable scoring rung is the half-rounder. Migrated from
+    // the room (circuit ~115 m on the ×2 field vs PLAY_TIMEOUT_S 12 s —
+    // RulesModule unit tests cover it); the reachable scoring rung is the
+    // half-rounder. Migrated from
     // the aimed max-elevation loft: SEED_HALF_ROUNDER's designated play banks
     // +1 half via the auto beats. Gates preserved: not an out, the scoring
     // runner parked at post ≥ 2, scoreDeltaHalves 1, banked for side A only.
@@ -698,7 +814,7 @@ describe('MatchRoom', () => {
     expect(room.state.scoreHalvesA).toBeGreaterThanOrEqual(1); // banked for the batting side (innings 1)
     expect(room.state.scoreHalvesB).toBe(0);
     expect(res.outs).toEqual([]);
-  }, 120000);
+  }, 300000);
 
   // (The old separate 'a caught batter increments the batting side outs' test
   // is absorbed by the caught-outcome test above — same seed, same gates.)
@@ -718,7 +834,7 @@ describe('MatchRoom', () => {
     // the gate; the pinned seed exhibits it by play 2 (park, then contact).
     const { maxRunners } = await drivePlayUntil(room, clientA, clientB, (_r, f) => f.maxRunners >= 2);
     expect(maxRunners).toBeGreaterThanOrEqual(2); // a parked survivor + the current batter-runner coexisted
-  }, 240000);
+  }, 600000);
 
   // ---- Full game / rematch -------------------------------------------------
 
@@ -747,7 +863,7 @@ describe('MatchRoom', () => {
     const winnerScore = room.state.winner === 'A' ? room.state.scoreHalvesA : room.state.scoreHalvesB;
     const loserScore = room.state.winner === 'A' ? room.state.scoreHalvesB : room.state.scoreHalvesA;
     expect(winnerScore).toBeGreaterThan(loserScore);
-  }, 900000);
+  }, 1800000);
 
   it('rematch at GAME_OVER resets to INITIAL_POSITIONING with a zeroed score', async () => {
     // Migrated: same seed as the marquee test drives to GAME_OVER, then the
@@ -772,7 +888,7 @@ describe('MatchRoom', () => {
     expect(room.state.inningsIndex).toBe(0);
     expect(room.state.runners.size).toBe(0);
     expect(room.state.currentBatterId).toBe(OPENER_ID);
-  }, 900000);
+  }, 1800000);
 
   it('garbage rng/seed join options cannot break the room (runtime-validated)', async () => {
     // Migrated: the gate is unchanged — junk options fall back to a wall-clock
@@ -790,20 +906,173 @@ describe('MatchRoom', () => {
     await waitForCondition(
       room,
       () => room.state.ballLive && Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz) > 0,
-      300,
+      ticksFor(GAME.AUTOPLAY_PITCH_DELAY_S + 2),
     );
     const speed = Math.hypot(room.state.ball.vx, room.state.ball.vy, room.state.ball.vz);
     expect(speed).toBeGreaterThan(20);
     expect(speed).toBeLessThan(27);
 
-    for (let i = 0; i < 240 && room.state.phase === 'PLAY'; i += 1) {
+    // Watch through at least one full pitch → miss → fast-respawn cycle.
+    for (let i = 0; i < ticksFor(GAME.AUTOPLAY_PITCH_DELAY_S + GAME.MISS_RESPAWN_S + 2) && room.state.phase === 'PLAY'; i += 1) {
       await room.waitForNextSimulationTick();
     }
     const uncaught = errorSpy.mock.calls.filter(
       (args) => typeof args[0] === 'string' && args[0].includes('[MatchRoom] uncaught exception'),
     );
     expect(uncaught).toEqual([]);
-  }, 30000);
+  }, 60000);
+
+  // ---- Readable-game overhaul (2026-07-05): hold, arming, relay, respawn, loft ----
+
+  describe('readable-game overhaul', () => {
+    it('outcome hold: the death tableau freezes for OUTCOME_HOLD_S after the resolution, then the field rebuilds on its slots', async () => {
+      // NEW (2026-07-05 overhaul §B5): resolvePlayNow broadcasts playOutcome
+      // and freezes the schema exactly as the play died; only finalisePlay
+      // (OUTCOME_HOLD_S sim-seconds later) respawns the ball and repaints
+      // runner/fielder schema. Gates: at resolution the ball is NOT parked,
+      // every fielder position is bit-identical on every tick of the hold,
+      // the hold demonstrably lasts, and finalise rebuilds the five EXACTLY
+      // on their slots.
+      const room = await colyseus.createRoom('match', { seed: SEED_FIRST_PLAY_CONTACT });
+      const { clientA, clientB } = await connectPair(room);
+      await startPlay(room, clientA, clientB);
+      for (let i = 0; i < PLAY_TICK_BUDGET && room.state.phase === 'PLAY'; i += 1) {
+        await room.waitForNextSimulationTick();
+      }
+      expect(room.state.phase).not.toBe('PLAY');
+
+      // The death tableau: the ball is wherever the play died, not respawned.
+      expect(ballParked(room)).toBe(false);
+      const tableau = [...room.state.fielders.values()].map((f) => ({ id: f.id, x: f.x, z: f.z }));
+      const deadBall = { x: room.state.ball.x, y: room.state.ball.y, z: room.state.ball.z };
+      let frozenTicks = 0;
+      while (!ballParked(room)) {
+        // finalise must arrive within the hold (+ headroom) — a stuck hold fails loudly.
+        expect(frozenTicks).toBeLessThan(ticksFor(GAME.OUTCOME_HOLD_S + 2));
+        await room.waitForNextSimulationTick();
+        if (ballParked(room)) break;
+        // Frozen: nothing repaints fielders or the ball mid-hold.
+        for (const f of tableau) {
+          expect(room.state.fielders.get(f.id)?.x).toBe(f.x);
+          expect(room.state.fielders.get(f.id)?.z).toBe(f.z);
+        }
+        expect(room.state.ball.x).toBe(deadBall.x);
+        expect(room.state.ball.z).toBe(deadBall.z);
+        frozenTicks += 1;
+      }
+      // The hold visibly lasted. Lower bound is load-proof, not wall-clock:
+      // each tick advances sim time by at most SIM_MAX_CATCHUP, so the hold
+      // can NEVER elapse in fewer ticks than this quotient even if the event
+      // loop stalls (typically it takes ~OUTCOME_HOLD_S × 60 ticks).
+      expect(frozenTicks).toBeGreaterThanOrEqual(Math.floor(GAME.OUTCOME_HOLD_S / PHYSICS.SIM_MAX_CATCHUP));
+
+      // Finalised: the drafted five rebuilt EXACTLY on their slots (innings 1:
+      // B fields, kian back on the bowling square).
+      const onField = ['kian', ...DRAFTED_B.filter((id) => id !== 'kian')];
+      onField.forEach((id, i) => {
+        const f = room.state.fielders.get(id);
+        const slot = FIELD.FIELDING_POSITIONS[i];
+        expect(f?.x).toBeCloseTo(slot?.x ?? NaN, 9);
+        expect(f?.z).toBeCloseTo(slot?.z ?? NaN, 9);
+      });
+    }, 300000);
+
+    it('catch arming: a caught play is only ever caught beyond CATCH_ARM_DISTANCE_M of the launch point', async () => {
+      // NEW (2026-07-05 overhaul §B2): the old world's backstop caught the
+      // ball ON the contact tick (travel ≈ 0.4 m). With catch arming, every
+      // catch/gather attempt is suppressed until the flight has travelled
+      // CATCH_ARM_DISTANCE_M from launch, so a caught resolution's death ball
+      // (schema synced on the catch tick, then frozen by the hold) must sit at
+      // least the arm distance out. Tolerances: the observed launch lags the
+      // true one by ≤1 poll tick (≤ ~0.6 m at exit speeds) and the assert is
+      // 2D while arming is 3D (up to ~0.3 m more at catch heights) — hence
+      // the −1 m allowance, still 3× the old contact-tick travel.
+      const room = await colyseus.createRoom('match', { seed: SEED_FIRST_PLAY_CAUGHT });
+      const { clientA, clientB } = await connectPair(room);
+      const { res, contact, launch, deathBall } = await drivePlayUntil(
+        room,
+        clientA,
+        clientB,
+        (r) => r.cause.kind === 'caught',
+      );
+      expect(res.cause.kind).toBe('caught');
+      expect(contact).toBe(true);
+      expect(launch).not.toBeNull();
+      const travelled = Math.hypot(deathBall.x - (launch?.x ?? 0), deathBall.z - (launch?.z ?? 0));
+      expect(travelled).toBeGreaterThanOrEqual(GAME.CATCH_ARM_DISTANCE_M - 1);
+    }, 300000);
+
+    it('relay/reception chain: two fielders hold in one play and the reception never dismisses the batter', async () => {
+      // NEW (2026-07-05 overhaul §B3 + the thrown-flight fix): a holder can
+      // only release the ball by THROWING, so an ordered two-holder sequence
+      // is a throw → teammate reception chain (relay target or post cover —
+      // the exact relay-target selection is pinned at the FieldingModule unit
+      // layer; the room pins the observable chain). With the thrown-flight
+      // guard the reception classifies gathered, never caught — so a play
+      // with any completed hold can never resolve 'caught'.
+      const room = await colyseus.createRoom('match', { seed: SEED_RELAY });
+      const { clientA, clientB } = await connectPair(room);
+      const { res, holderSeq } = await drivePlayUntil(
+        room,
+        clientA,
+        clientB,
+        (_r, f) => new Set(f.holderSeq).size >= 2,
+        12, // reception chains are common but not per-window-certain; 12 spans two innings safely
+      );
+      expect(new Set(holderSeq).size).toBeGreaterThanOrEqual(2);
+      expect(res.cause.kind).not.toBe('caught');
+    }, 900000);
+
+    it('a missed swing respawns the ball after ~MISS_RESPAWN_S — the re-pitch arrives fast, not at the roll-to-rest pace', async () => {
+      // NEW (2026-07-05 overhaul §B4): ALWAYS_MISS guarantees every swing
+      // fails, so the play cycles pitch → miss → fast respawn → re-pitch. The
+      // gap from a failed swing roll to the NEXT pitch roll is measured in
+      // wall time (ticks run at real 60 Hz): expected MISS_RESPAWN_S +
+      // AUTOPLAY_PITCH_DELAY_S ≈ 3 s; the OLD roll-to-rest path took ~7 s+ of
+      // flight/rolling before the rest latch even started — cleanly outside
+      // the generous upper bound.
+      const room = await colyseus.createRoom('match', { rng: ALWAYS_MISS });
+      const { clientA, clientB } = await connectPair(room);
+      const stamps: { contest: string; success: boolean; at: number }[] = [];
+      clientA.onMessage('roll', (e: RollEvent) => {
+        stamps.push({ contest: e.contest, success: e.success, at: Date.now() });
+      });
+      await startPlay(room, clientA, clientB);
+      await waitForCondition(
+        room,
+        () => stamps.filter((s) => s.contest === 'pitch').length >= 2,
+        ticksFor(2 * (GAME.AUTOPLAY_PITCH_DELAY_S + GAME.MISS_RESPAWN_S + 3)),
+      );
+      const swingIdx = stamps.findIndex((s) => s.contest === 'swing' && !s.success);
+      expect(swingIdx).toBeGreaterThan(0); // a pitch precedes it
+      const nextPitch = stamps.slice(swingIdx + 1).find((s) => s.contest === 'pitch');
+      expect(nextPitch).toBeDefined();
+      const gapS = ((nextPitch?.at ?? 0) - (stamps[swingIdx]?.at ?? 0)) / 1000;
+      const expected = GAME.MISS_RESPAWN_S + GAME.AUTOPLAY_PITCH_DELAY_S;
+      expect(gapS).toBeGreaterThanOrEqual(expected - 1.5); // delivery-jitter headroom
+      expect(gapS).toBeLessThanOrEqual(expected + 2.5); // the old rest path can never fit under this
+    }, 120000);
+
+    it('loft: an auto hit visibly climbs after contact — the 0°-forever line drive is dead', async () => {
+      // NEW (2026-07-05 overhaul §B1): swings sample a real launch elevation
+      // in [LOFT_MIN, LOFT_MAX]. The unit layer pins the sampled band exactly;
+      // the room pins the observable consequence — post-contact the ball GAINS
+      // height. The old 0° aim could never exceed ~launch height (~1 m, no
+      // upward velocity component existed), so a 2.5 m apex is unreachable
+      // pre-overhaul and routine now.
+      const room = await colyseus.createRoom('match', { seed: SEED_LOFT });
+      const { clientA, clientB } = await connectPair(room);
+      const { contact, maxBallY } = await drivePlayUntil(
+        room,
+        clientA,
+        clientB,
+        (_r, f) => f.contact && f.maxBallY >= 2.5,
+        8, // no innings-dependent asserts — the window may cross a switch
+      );
+      expect(contact).toBe(true);
+      expect(maxBallY).toBeGreaterThanOrEqual(2.5);
+    }, 600000);
+  });
 
   // ---- M7: draft & setPitcher ------------------------------------------------
 
@@ -887,10 +1156,13 @@ describe('MatchRoom', () => {
       }
       expect(plays).toBeGreaterThanOrEqual(5); // every original queue member must bat at least once
       expect(room.state.battingSide).toBe('B');
+      // drivePlay absorbed the innings-switching play's outcome hold, so the
+      // side swap + pitcher re-derivation (finalise-time work, 2026-07-05)
+      // have landed by the time the loop exits.
       expect(room.state.currentPitcherId).toBe('joel'); // A fields now; joel has A's best arm (pitch 9)
       expect(room.state.fielders.size).toBe(5);
       expect([...room.state.fielders.keys()].sort()).toEqual(['carl', 'joe', 'joel', 'jonty', 'laurie']);
-    }, 900000);
+    }, 1800000);
   });
 
   // ---- M6: role gating -------------------------------------------------------
@@ -992,7 +1264,11 @@ describe('MatchRoom', () => {
       const { clientA, clientB } = await connectPair(room);
       await startPlay(room, clientA, clientB);
       // The auto pitch beat puts the ball demonstrably in flight (no client pitch any more).
-      await waitForCondition(room, () => room.state.ballLive && room.state.ball.z > 1, 300);
+      await waitForCondition(
+        room,
+        () => room.state.ballLive && room.state.ball.z > 1,
+        ticksFor(GAME.AUTOPLAY_PITCH_DELAY_S + 2),
+      );
       const token = clientB.reconnectionToken;
       await clientB.leave(false); // unconsented
       await waitForCondition(room, () => room.state.paused);
@@ -1014,7 +1290,7 @@ describe('MatchRoom', () => {
     it('pause freezes the beats: no roll broadcasts while paused across ≥1 s real time, resuming on reconnect', async () => {
       // NEW (auto-play redesign §7): beats compare against simTime, which the
       // paused tick never advances — verified, not assumed. The drop lands
-      // BEFORE the first pitch beat (AUTOPLAY_PITCH_DELAY_S = 1 s), so a beat
+      // BEFORE the first pitch beat (AUTOPLAY_PITCH_DELAY_S), so a beat
       // firing while paused would be caught as a roll broadcast / live ball.
       const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
       const { clientA, clientB } = await connectPair(room);
@@ -1029,7 +1305,9 @@ describe('MatchRoom', () => {
       // either way NOTHING may advance while paused, which is the invariant.
       const rollsAtPause = rolls.length;
       const frozen = { live: room.state.ballLive, x: room.state.ball.x, z: room.state.ball.z };
-      await new Promise((resolve) => setTimeout(resolve, 1200)); // > AUTOPLAY_PITCH_DELAY_S of real time
+      // Strictly MORE than the pitch delay of real time, derived so a pacing
+      // retune can never silently make this window shorter than the beat.
+      await new Promise((resolve) => setTimeout(resolve, (GAME.AUTOPLAY_PITCH_DELAY_S + 0.3) * 1000));
       expect(rolls.length).toBe(rollsAtPause); // no roll broadcasts while frozen
       expect(room.state.ballLive).toBe(frozen.live);
       expect(room.state.ball.x).toBe(frozen.x);
@@ -1039,9 +1317,13 @@ describe('MatchRoom', () => {
       await waitForCondition(room, () => !room.state.paused);
       // Unpaused: sim time resumes, beats resume — new rolls arrive (the pitch
       // beat if it was still pending, otherwise the frozen flight's next beat).
-      await waitForCondition(room, () => rolls.length > rollsAtPause, 600);
+      await waitForCondition(
+        room,
+        () => rolls.length > rollsAtPause,
+        ticksFor(GAME.AUTOPLAY_PITCH_DELAY_S + GAME.MISS_RESPAWN_S + 3),
+      );
       await rejoined.leave();
-    }, 30000);
+    }, 60000);
 
     it('a consented mid-game leave notifies the survivor and disposes the room', async () => {
       const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS });
@@ -1197,9 +1479,11 @@ describe('MatchRoom', () => {
         plays += 1;
       }
       expect(room.state.phase).not.toBe('GAME_OVER'); // innings 3 of 4
+      // drivePlay absorbed the second switch's outcome hold: the returning
+      // layout (finalise-time rebuild, 2026-07-05) has landed here.
       expect(room.state.fielders.get('josh')?.x).toBe(5); // B's custom layout came back
       expect(room.state.fielders.get('josh')?.z).toBe(20);
-    }, 900000);
+    }, 1800000);
 
     it('substitute works with a real bench (fieldSlotsOverride) and syncs bench/count', async () => {
       const room = await colyseus.createRoom<MatchState>('match', { rng: ALWAYS_MISS, fieldSlotsOverride: 3 });
@@ -1253,7 +1537,7 @@ describe('MatchRoom', () => {
         (f) => f.stamina < (CHARACTERS.find((c) => c.id === f.id)?.stats.stamina ?? 0),
       );
       expect(drained).toBe(true);
-    }, 120000);
+    }, 300000);
   });
 
   // ---- M9: abilities (room wiring) -------------------------------------------
@@ -1283,12 +1567,13 @@ describe('MatchRoom', () => {
     it('WALL: a drive stops dead at the whale and the play resolves without a caught-from-stop', async () => {
       // Migrated from ALWAYS_MISS + the aimed flat drive: tests can no longer
       // aim, so the whale is parked on the PINNED seed's own play-1 hit
-      // corridor (SEED_WALL_SPOT — derived by the Task-3 search harness from
-      // this seed's observed hit direction, then pinned; the drive is
-      // deterministic, so he stands in its path every run). Gates preserved:
-      // the drive dies at the whale (blocker stop), the play still resolves,
-      // and the stop is never classified 'caught' — with real dice that means
-      // this seed's whale pCatch roll must FAIL, which the search verified.
+      // corridor (SEED_WALL_SPOT — re-derived by the Task-2 sweep for the
+      // ×2/loft world from this seed's observed deterministic play-1 roll,
+      // then pinned; see the constant's comment for the tail-of-roll
+      // placement rationale). Gates preserved: the drive dies at the whale,
+      // the play still resolves, and the stop is never classified 'caught' —
+      // the ball reaches him post-bounce, so even a WON roll is a gather,
+      // verified live in the search.
       const room = await colyseus.createRoom<MatchState>('match', { seed: SEED_WALL });
       const { clientA, clientB } = await connectPair(room);
       await waitForPhase(room, 'DRAFT');
@@ -1303,7 +1588,7 @@ describe('MatchRoom', () => {
 
       // The drive must die at the whale: ball speed collapses while it is near him.
       let stoppedNearWhale = false;
-      for (let i = 0; i < 2400 && room.state.phase === 'PLAY'; i += 1) {
+      for (let i = 0; i < PLAY_TICK_BUDGET && room.state.phase === 'PLAY'; i += 1) {
         await room.waitForNextSimulationTick();
         const whale = room.state.fielders.get('whale');
         if (whale === undefined || !room.state.ballLive) continue;
@@ -1317,7 +1602,7 @@ describe('MatchRoom', () => {
       expect(room.state.phase).not.toBe('PLAY');
       const res = JSON.parse(room.state.lastOutcome) as PlayResolution;
       expect(res.cause.kind).not.toBe('caught');
-    }, 120000);
+    }, 300000);
 
     it('WALL: the whale can throw the ball he gathered — his own blocker never pins the release (final-review fix)', async () => {
       // A held ball parks at the whale's hands, INSIDE his own armed blocker
@@ -1326,10 +1611,10 @@ describe('MatchRoom', () => {
       // PhysicsModule own-throw regression test). Gates preserved: gather →
       // hold → throw → the ball ESCAPES cleanly. Migrated from the
       // ALWAYS_CATCH + whale-as-pitcher + aimed-grounder choreography: the
-      // pinned seed parks the whale on his own play-1 hit corridor (same
-      // SEED_WALL/SEED_WALL_SPOT as the stop-dead test — the search verified
-      // that on THIS seed the blocker-stopped ball is then GATHERED by the
-      // whale himself, held, thrown, and escapes).
+      // pinned seed parks the whale on his own play-1 roll corridor
+      // (SEED_WALL_THROW_SPOT — Task-2 sweep; the live search verified that
+      // on THIS seed the stopped ball is GATHERED by the whale himself, held,
+      // thrown, escapes cleanly and forces a run-out).
       const room = await colyseus.createRoom<MatchState>('match', { seed: SEED_WALL_THROW });
       const { clientA, clientB } = await connectPair(room);
       await waitForPhase(room, 'DRAFT');
@@ -1340,8 +1625,12 @@ describe('MatchRoom', () => {
       await startPlay(room, clientA, clientB);
 
       // Gather (hasBall flips true), then the delayed release (flips false).
-      await waitForCondition(room, () => room.state.fielders.get('whale')?.hasBall === true, 2400);
-      await waitForCondition(room, () => room.state.fielders.get('whale')?.hasBall === false, 600);
+      await waitForCondition(room, () => room.state.fielders.get('whale')?.hasBall === true, PLAY_TICK_BUDGET);
+      await waitForCondition(
+        room,
+        () => room.state.fielders.get('whale')?.hasBall === false,
+        ticksFor(GAME.THROW_RELEASE_DELAY_S + 3),
+      );
 
       // The thrown ball must ESCAPE the whale: clear of him and still
       // travelling. A pinned release would sit at his feet at ~zero speed
@@ -1356,7 +1645,7 @@ describe('MatchRoom', () => {
         if (d > 3 && speed > 5) escaped = true;
       }
       expect(escaped).toBe(true);
-    }, 120000);
+    }, 300000);
 
     it('CLUTCH_SWING: carl’s final-innings drive matches the +3-power prediction, his innings-1 drive the plain one', async () => {
       // Migrated from the ALWAYS_CATCH + aimed-drive exit-speed comparison.
@@ -1413,7 +1702,7 @@ describe('MatchRoom', () => {
         await startPlay(room, clientA, clientB);
         let exit = 0;
         let prevVz = 0;
-        for (let i = 0; i < 2400 && room.state.phase === 'PLAY'; i += 1) {
+        for (let i = 0; i < PLAY_TICK_BUDGET && room.state.phase === 'PLAY'; i += 1) {
           await room.waitForNextSimulationTick();
           // Sample validity (probe findings — each guard closed a REAL polluted
           // sample): the ONLY event that flips the polled ball from a strongly
@@ -1449,6 +1738,17 @@ describe('MatchRoom', () => {
       let clutchProven = false;
       for (let game = 0; game < 3 && !clutchProven; game += 1) {
         if (game > 0) {
+          // Retry-path fix (Task-2 full-check run 2 caught this live): a null
+          // final measurement leaves the room MID-game (PRE_PLAY, innings 2),
+          // where rematch is rejected and the old bare waitForPhase hung. The
+          // retry the measurement comments promise must first DRAIN the
+          // current game to GAME_OVER — the only phase rematch is legal in.
+          let drain = 0;
+          while (room.state.phase !== 'GAME_OVER' && drain < 60) {
+            await drivePlay(room, clientA, clientB);
+            drain += 1;
+          }
+          expect(room.state.phase).toBe('GAME_OVER');
           clientA.send('rematch');
           await waitForPhase(room, 'INITIAL_POSITIONING');
         }
@@ -1491,6 +1791,6 @@ describe('MatchRoom', () => {
         }
       }
       expect(clutchProven).toBe(true); // carl connected in SOME final innings within three games
-    }, 900000);
+    }, 2400000); // worst case now includes draining a retry game to GAME_OVER before its rematch
   });
 });
